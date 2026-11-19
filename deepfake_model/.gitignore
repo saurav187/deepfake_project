@@ -1,0 +1,38 @@
+.venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+datasets/
+pipeline/data/
+pipeline/outputs/
+research/legacy_models/
+*.log
+
+# Local provenance, research PDFs and generated run output
+copy_manifest.json
+research/papers/
+pipeline/output.txt
+
+# Large datasets, audio, weights and archives (including future experiments)
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.pth
+*.pt
+*.pkl
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.m4a
+*.zip
+
+# Local credentials and machine configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store
+Thumbs.db

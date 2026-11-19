@@ -1,0 +1,28 @@
+# Machine-local configuration
+.agents/
+.aws/
+.codex/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python and JavaScript environments/build output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+node_modules/
+dist/
+build/
+.next/
+*.log
+.DS_Store
+Thumbs.db
+
+# Model data/artifact exclusions also live in deepfake_model/.gitignore
+
+# Local Git recovery information
+GIT_SETUP.local.txt

@@ -1,0 +1,604 @@
+Research Paper Pipeline
+Audio recordings
+        ↓
+Audio segmentation (2–3 sec)
+        ↓
+MFCC extraction (40 features)
+        ↓
+Feature vector
+        ↓
+Train ML models
+        ↓
+Majority voting
+        ↓
+Real / Fake classification
+
+
+
+
+(venv311) [saurav@arch code]$ python indi*
+Starting feature extraction...
+
+100%|████████████████████████████████████████████████████████████████████████████████████████████████| 50/50 [05:43<00:00,  6.86s/it]
+
+Extraction finished.
+Valid files processed: 16511
+Invalid / skipped files: 94
+
+Final dataset shape:
+X shape: (16511, 60, 128)
+y shape: (16511,)
+
+16511 → number of audio samples
+60 → feature dimension
+128 → time frames
+
+60 = 20 MFCC + 20 delta + 20 delta-delta
+
+128 = fixed number of frames (1.28 sec audio)
+
+Saved processed dataset to: indiefake_processed
+(venv311) [saurav@arch code]$ cd indiefake_processed
+(venv311) [saurav@arch indiefake_processed]$ ls 
+X_indiefake.npy  y_indiefake.npy
+
+(venv311) [saurav@arch indiefake_processed]$ python script.py
+Shape of X: (16511, 60, 128)
+Shape of y: (16511,)
+Data type of X: float32
+Data type of y: int64
+First sample of X:
+ [[-8.0209576e+02 -8.0209576e+02 -6.0869769e+02 ... -2.3159128e+02
+  -2.3887914e+02 -2.4075478e+02]
+ [ 0.0000000e+00  0.0000000e+00  4.6936226e+01 ...  1.1243828e+01
+   1.6479691e+01  2.2106567e+01]
+ [ 0.0000000e+00  0.0000000e+00 -6.3989662e+01 ... -3.8275040e+01
+  -3.8103325e+01 -3.6069077e+01]
+ ...
+ [-1.9559823e+00 -1.9559823e+00 -1.9559823e+00 ...  7.5837731e-01
+  -7.3706627e-01 -7.3627657e-01]
+ [ 4.2328167e-01  4.2328167e-01  4.2328167e-01 ...  4.6271741e-02
+  -1.5922378e+00 -1.2377920e+00]
+ [-1.0587739e-01 -1.0587739e-01 -1.0587739e-01 ...  1.6994657e-01
+  -1.5152368e-01  1.5017033e-01]]
+First label: 0
+
+
+
+So effectively your model sees ~1.28 seconds per clip.
+
+
+
+
+what does file contain
+20 MFCC + 20 Delta + 20 Delta-Delta features = 60 total features per time frame.
+
+0 → Real
+1 → Fake
+
+It stores everything
+X = np.array(all_features, dtype=np.float32)
+y = np.array(all_labels, dtype=np.int64)
+
+And saves:
+X.shape = (16511, 60, 128)
+y.shape = (16511,)
+
+So your final dataset is:
+X.shape = (16511, 60, 128)
+y.shape = (16511,)
+
+
+pipeline is:
+Audio (4–5 sec)
+      ↓
+MFCC (20)
+      ↓
+Delta (20)
+      ↓
+Delta-Delta (20)
+      ↓
+Stack → 60 features
+      ↓
+Keep first 128 frames (~1.28 sec)
+      ↓
+Label (0 or 1)
+      ↓
+Save as .npy
+
+
+(venv311) [saurav@arch indiefake_processed]$ python class_balance.py
+Real: 6261
+Fake: 10250
+
+That means:
+Real ≈ 38%
+Fake ≈ 62%
+
+class balancing
+
+Speakers 1–35 → Train
+Speakers 36–42 → Validation
+Speakers 43–50 → Test
+
+dataset contains 16,511 audio samples, each represented as a 60 × 128 feature matrix (most likely MFCC-based features), with integer class labels.
+
+
+1st Model
+2D Convolutional Neural Network (CNN)
+Accuracy = 94.22%
+
+Confusion Matrix Analysis
+Real predicted Real → 1208 ✅
+Real predicted Fake → 45 ❌
+Fake predicted Real → 146 ❌
+Fake predicted Fake → 1904 ✅
+
+
+Prediction Result:
+FAKE (Confidence: 1.0000)
+ahrnish_test_audio_4.ogg → FAKE (Confidence: 1.0000)
+ahrnish_test_audio_1.ogg → FAKE (Confidence: 1.0000)
+ahrnish_test_audio_2.ogg → FAKE (Confidence: 0.9999)
+fake_tts_test_audio_1.mp3 → FAKE (Confidence: 1.0000)
+ahrnish_test_audio_3.ogg → FAKE (Confidence: 1.0000)
+voice_4.wav → FAKE (Confidence: 0.9887)
+voice_1.wav → FAKE (Confidence: 0.9999)
+voice_2.wav → FAKE (Confidence: 0.9890)
+voice_3.wav → FAKE (Confidence: 1.0000)
+voice_5.wav → FAKE (Confidence: 0.8078)
+voice_57.wav → FAKE (Confidence: 1.0000)
+voice_61.wav → FAKE (Confidence: 0.9899)
+voice_60.wav → FAKE (Confidence: 0.9998)
+voice_59.wav → FAKE (Confidence: 0.9869)
+voice_58.wav → FAKE (Confidence: 1.0000)
+
+
+
+
+Model 2.0 training and preprocessing 
+
+Raw audio
+   ↓
+Resample to 16kHz
+   ↓
+Peak normalize
+   ↓
+Segment audio (1.28s windows)
+   ↓
+Extract MFCC + delta + delta2
+   ↓
+Compute dataset mean/std
+   ↓
+Feature normalization
+   ↓
+Data augmentation (real audio)
+   ↓
+Speaker-independent split
+   ↓
+CNN + LSTM model
+   ↓
+Majority voting
+
+
+
+first step :
+
+Raw audio
+↓
+Resample to 16kHz
+↓
+Peak normalize
+↓
+Segment audio (1.28s windows)
+↓
+Extract MFCC + delta + delta2
+↓
+Compute dataset mean/std
+↓
+Feature normalization
+↓
+Save dataset
+
+
+Speakers 1–35 → Train
+Speakers 36–42 → Validation
+Speakers 43–50 → Test
+
+X          → (N, 60, 128) features
+y          → (N,) labels
+speaker_id → (N,)
+split      → (N,) 0=train 1=val 2=test
+
+Dataset size: (50342, 60, 128)
+X            → (50342, 60, 128) features
+y            → (50342,) labels
+speaker_id   → (50342,)
+split        → (50342,)
+
+label
+0 → real
+1 → fake
+
+split
+0 → train
+1 → validation
+2 → test
+
+speaker_id
+1–50
+
+
+Data preprocessing Output 
+Train: 39872
+Val: 3363
+Test: 7107
+
+Real: 16833
+Fake: 33509
+
+
+1st model Output
+
+Test Accuracy: 0.746447164767131 
+Confusion Matrix: 
+   [[2729 1183] 
+   [ 619 2576]]
+
+            Predicted
+           Real   Fake
+Actual
+Real       2729   1183
+Fake        619   2576
+
+Real detection
+2729 / (2729+1183)
+≈ 69.7%
+
+Fake detection
+2576 / (2576+619)
+≈ 80.6%
+
+So the model is biased toward predicting Fake.
+
+
+2nd Model : 
+
+| Change                            | Why                     |
+| --------------------------------- | ----------------------- |
+| LSTM hidden size   128 → 64       | reduces overfitting     |
+| Dropout   0.3 → 0.5               | stronger regularization |
+| Added   noise augmentation        | improves generalization |
+
+2nd Model Result :
+
+Test Accuracy: 0.6865062614323906 
+
+Confusion Matrix: 
+[[2059 1853] 
+[ 375 2820]]
+
+| Actual | Pred Real | Pred Fake |
+| ------ | --------- | --------- |
+| Real   | 2059      | 1853      |
+| Fake   | 375       | 2820      |
+
+Validation dropped a lot:
+Val Accuracy ≈ 0.57 → 0.76
+Test Accuracy ≈ 0.68
+
+Real detection:
+2059 / (2059+1853) ≈ 52%
+
+Fake detection:
+2820 / (2820+375) ≈ 88%
+
+
+
+3rd Model :
+
+Changes from your previous code :
+❌ Remove MFCC noise augmentation
+❌ Remove class weighting
+✔ Use normal BCE loss
+✔ Dropout = 0.4
+✔ Keep smaller LSTM (hidden=64)
+
+Result :
+Test Accuracy: 0.730828760377093
+
+Confusion Matrix:
+[[3067  845]
+ [1068 2127]]
+
+ | Actual | Pred Real | Pred Fake |
+| ------ | --------- | --------- |
+| Real   | 3067      | 845       |
+| Fake   | 1068      | 2127      |
+
+
+
+Summary
+
+| Model                             | Test Accuracy | Real Detection | Fake Detection |
+| --------------------------------- | ------------- | -------------- | -------------- |
+| Model 1 (original CNN-LSTM)       |   0.746       | 69.7%          | 80.6%          |
+| Model 2 (noise + class weights)   |   0.686       | 52%            | 88%            |
+| Model 3 (fixed weights + dropout) |   0.731       | 78.4%          | 66.6%          |
+
+
+
+
+
+
+Another one 
+Raw Audio
+↓
+Resample (16kHz)
+↓
+Peak normalization
+↓
+Segment audio (2 sec)
+↓
+Log-Mel Spectrogram (128 bins)
+↓
+Dataset normalization
+↓
+SpecAugment
+↓
+CNN feature extractor
+↓
+BiLSTM temporal modeling
+↓
+Classifier
+↓
+Segment voting
+↓
+Final prediction
+
+
+Speaker 49: 100%|█████████████████████████████████████████████████████████████████████| 100/100 [00:02<00:00, 38.00it/s]
+Speaker 49: 100%|█████████████████████████████████████████████████████████████████████| 139/139 [00:03<00:00, 42.20it/s]
+Speaker 50: 100%|█████████████████████████████████████████████████████████████████████| 195/195 [00:04<00:00, 41.51it/s]
+Dataset shape: (32223, 128, 128)
+Dataset saved: indiefake_logmel.h5
+
+
+Resul : 
+            Predicted
+           Real   Fake
+Actual
+Real       2031   557
+Fake        700   1267
+
+
+
+overall 
+
+| Model            | Test Acc  | Real Detect | Fake Detect |
+| ---------------- | --------- | ----------- | ----------- |
+| MFCC CNN-LSTM    |   0.746   | 69.7%       | 80.6%       |
+| MFCC tuned       |   0.73    | 78.4%       | 66.6%       |
+| Log-Mel CNN-LSTM |   0.724   | 78.5%       | 64.4%       |
+
+
+
+
+MFCC_Model_3 Confusion Matrix
+[[3067  845]
+ [1068 2127]]
+
+LogMel_Model Confusion Matrix
+[[2031  557]
+ [ 700 1267]]
+
+| Model                | Accuracy  | Real Detect | Fake Detect |
+| -------------------- | --------- | ----------- | ----------- |
+|   MFCC CNN-LSTM v3   |   0.731   | 78.4%       | 66.6%       |
+|   LogMel CNN-LSTM    |   0.724   |   78.5%     | 64.4%       |
+
+
+
+next Log-Mel model :
+Audio
+↓
+Resample 16k
+↓
+Peak normalize
+↓
+Segment audio (2 sec)
+↓
+LogMel (128 bins)
+↓
+Delta
+↓
+Delta²
+↓
+Stack → (3,128,128)
+↓
+Dataset normalization
+↓
+SpecAugment
+↓
+Deep CNN
+↓
+BiGRU
+↓
+Classifier
+
+
+
+
+model V5 
+
+| component       | choice         | reason                 |
+| --------------- | -------------- | ---------------------- |
+| sample rate     | 16 kHz         | standard speech freq   |
+| segment length  | 2 sec          | balance detail + speed |
+| mel bands       | 128            | good resolution        |
+| hop length      | 160            | 10 ms frame            |
+| FFT             | 512            | common speech config   |
+| normalization   | per-feature    | stable gradients       |
+| silence removal | yes            | reduces noise          |
+| padding         | repeat padding | avoids silence bias    |
+
+
+Total speakers: 49
+Train: 34
+Val: 7
+Test: 8
+
+Saved split.csv
+split  label
+test   1        1158
+       0         474
+train  1        9050
+       0        6220
+val    1         802
+       0         495
+Name: count, dtype: int64
+
+100%|█████████████████████████████████████████████████████████████████████████████| 18199/18199 [06:27<00:00, 46.95it/s]
+
+Total segments: 37631
+
+
+============================================================
+DONE
+  X_features.npy  : (19146, 128, 94, 1)   dtype=float32
+  y_labels.npy    : (19146,)   Real=8172  Fake=10974
+  speaker_ids.npy : (19146,)  unique speakers=50
+  speaker_map.json: 50 entries
+  Feature range   : [-80.0, 0.0]  μ=-55.825  σ=18.671
+============================================================
+
+Next step: python 02_train_cnn_lstm.py --data_dir data
+
+
+
+(venv) [saurav@arch final]$ ls 
+01_prepare_dataset.py  02_train_cnn_lstm.py  03_threshold_stabilizer.py  04_realtime_inference.py  data  README.md
+(venv) [saurav@arch final]$ python 02_train_cnn_lstm.py
+Device: cpu  |  AMP: False
+Loading features …
+  X: (19146, 128, 94, 1)   Real=8172  Fake=10974
+  Speakers: 50
+  pos_weight: 0.7447
+
+CNN+LSTM parameters: 4,361,185
+
+Speaker-independent 5-fold CV (10 total training runs)
+
+
+============================================================
+OUTER FOLD 1/5  (test speakers: [ 5 11 12 14 18 19 21 23 35 48], train/val: 13353  test: 5793)
+============================================================
+    Fold 1 inner 1: AUC=0.9212  Youden-τ=0.1474  EER-τ=0.1747
+    Fold 1 inner 2: AUC=0.9659  Youden-τ=0.3508  EER-τ=0.4807
+  Outer fold 1 → AUC=0.9661  F1=0.9321  Youden-τ=0.3508  EER-τ=0.4845  ECE=0.0645
+
+============================================================
+OUTER FOLD 2/5  (test speakers: [ 6  7 10 15 16 22 28 31 43 44], train/val: 16825  test: 2321)
+============================================================
+    Fold 2 inner 1: AUC=0.9591  Youden-τ=0.7357  EER-τ=0.6760
+    Fold 2 inner 2: AUC=0.9794  Youden-τ=0.3416  EER-τ=0.3113
+  Outer fold 2 → AUC=0.9898  F1=0.9519  Youden-τ=0.7845  EER-τ=0.5963  ECE=0.0257
+
+============================================================
+OUTER FOLD 3/5  (test speakers: [ 2  4 13 26 30 33 39 45 47 49], train/val: 15614  test: 3532)
+============================================================
+    Fold 3 inner 1: AUC=0.9422  Youden-τ=0.5297  EER-τ=0.5824
+    Fold 3 inner 2: AUC=0.9379  Youden-τ=0.9411  EER-τ=0.8706
+  Outer fold 3 → AUC=0.9382  F1=0.8760  Youden-τ=0.8404  EER-τ=0.6504  ECE=0.0734
+
+============================================================
+OUTER FOLD 4/5  (test speakers: [ 3  9 17 24 25 29 32 34 37 42], train/val: 15896  test: 3250)
+============================================================
+    Fold 4 inner 1: AUC=0.9570  Youden-τ=0.1893  EER-τ=0.2494
+    Fold 4 inner 2: AUC=0.9696  Youden-τ=0.7836  EER-τ=0.7908
+  Outer fold 4 → AUC=0.9665  F1=0.9409  Youden-τ=0.7076  EER-τ=0.7724  ECE=0.0178
+
+============================================================
+OUTER FOLD 5/5  (test speakers: [ 0  1  8 20 27 36 38 40 41 46], train/val: 14896  test: 4250)
+============================================================
+    Fold 5 inner 1: AUC=0.9572  Youden-τ=0.1253  EER-τ=0.1657
+    Fold 5 inner 2: AUC=0.9698  Youden-τ=0.4769  EER-τ=0.8075
+  Outer fold 5 → AUC=0.9547  F1=0.9369  Youden-τ=0.7058  EER-τ=0.8709  ECE=0.0427
+
+Cached fold records → outputs/fold_records_cnnlstm.pkl
+
+======================================================================
+SPEAKER-INDEPENDENT RESULTS  (mean ± std over outer folds)
+======================================================================
+
+  ── Youden J ──
+    auc            0.9630 ± 0.0169
+    accuracy       0.8962 ± 0.0361
+    f1             0.9276 ± 0.0266
+    sensitivity    0.8966 ± 0.0475
+    specificity    0.8979 ± 0.0390
+    far            0.1021 ± 0.0390
+    frr            0.1034 ± 0.0475
+    brier          0.0670 ± 0.0209
+    threshold      0.6778 ± 0.1711
+
+  ── EER ──
+    auc            0.9630 ± 0.0169
+    accuracy       0.8914 ± 0.0273
+    f1             0.9244 ± 0.0192
+    sensitivity    0.8914 ± 0.0274
+    specificity    0.8915 ± 0.0267
+    far            0.1085 ± 0.0267
+    frr            0.1086 ± 0.0274
+    brier          0.0670 ± 0.0209
+    threshold      0.6749 ± 0.1349
+
+  ── Fixed 0.5 ──
+    auc            0.9630 ± 0.0169
+    accuracy       0.9094 ± 0.0288
+    f1             0.9384 ± 0.0204
+    sensitivity    0.9296 ± 0.0367
+    specificity    0.8480 ± 0.0515
+    far            0.1520 ± 0.0515
+    frr            0.0704 ± 0.0367
+    brier          0.0670 ± 0.0209
+    threshold      0.5000 ± 0.0000
+
+  ── Platt+Youden ──
+    auc            0.9630 ± 0.0169
+    accuracy       0.8962 ± 0.0361
+    f1             0.9276 ± 0.0266
+    sensitivity    0.8966 ± 0.0475
+    specificity    0.8979 ± 0.0390
+    far            0.1021 ± 0.0390
+    frr            0.1034 ± 0.0475
+    brier          0.0610 ± 0.0149
+    threshold      0.7526 ± 0.1238
+
+  ── Temp+Youden ──
+    auc            0.9630 ± 0.0169
+    accuracy       0.8962 ± 0.0361
+    f1             0.9276 ± 0.0266
+    sensitivity    0.8966 ± 0.0475
+    specificity    0.8979 ± 0.0390
+    far            0.1021 ± 0.0390
+    frr            0.1034 ± 0.0475
+    brier          0.0649 ± 0.0180
+    threshold      0.6244 ± 0.1133
+
+  ── Stability Metrics ──
+    AUC std             0.016878
+    Youden thresh std   0.171131
+    EER thresh std      0.134859
+    Instability ratio   10.14×
+    ECE (raw)           0.0448 ± 0.0215
+    ECE (Platt)         0.0335 ± 0.0029
+    Instability 95% CI  [1.96×, 37.53×]
+======================================================================
+  Saved 5 figures to outputs
+
+✅ Checkpoint saved → outputs/deepfake_cnnlstm.pth
+✅ Best fold: 2  AUC=0.9898  Youden-τ=0.7845
+
+Next step: python 04_realtime_inference.py --checkpoint outputs/deepfake_cnnlstm.pth
+
