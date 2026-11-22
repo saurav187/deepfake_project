@@ -42,6 +42,8 @@ echo "$(date '+%F %T') building manifest"
 $PY -m detector.data.build_manifest asvspoof5
 echo "$(date '+%F %T') running audit"
 $PY -m detector.data.audit
+echo "$(date '+%F %T') running edge probe (silence shortcut gate)"
+$PY -m detector.data.edge_probe
 
 for encoder in wav2vec2-xls-r-300m wavlm-base-plus; do
     out=detector/runs/models/${encoder}_s42

@@ -18,6 +18,8 @@ import soundfile as sf
 import soxr
 
 SR = 16000
+EDGE_CUT_S = 0.25   # see prepare()
+EDGE_FADE_S = 0.15
 
 
 @dataclass
@@ -107,18 +109,35 @@ def speech_bounds(wave: np.ndarray, rel_db: float = 40.0, floor_db: float = -60.
 
 
 def prepare(wave: np.ndarray, target_dbfs: float = -25.0) -> np.ndarray:
-    """Trim edge silence and normalise loudness of the active frames."""
-    start, end = speech_bounds(wave)
+    """Trim edge silence and normalise loudness of the active frames.
+
+    The trim has no margin. In ASVspoof 5 train, genuine files carry leading and
+    trailing silence (median 0.16 s / 0.22 s) while fakes have none, so any kept
+    margin would leave a quiet onset that marks genuine audio."""
+    start, end = speech_bounds(wave, margin_s=0.0)
     wave = wave[start:end]
     if len(wave) == 0:
         return wave
+    # Fakes in ASVspoof 5 train stop abruptly at full level, while genuine speech
+    # decays naturally (tail -3.1 vs -7.0 dB re. active level). Dropping 0.25 s at
+    # each edge and fading the new edges over 0.15 s brought every edge-level and
+    # edge-slope cue to AUC <= 0.60 on a 2,400-recording train sample; dropping
+    # more did not help. Short clips lose proportionally less.
+    cut = min(EDGE_CUT_S, 0.1 * len(wave) / SR)
+    wave = wave[int(cut * SR): len(wave) - int(cut * SR)]
     db = frame_db(wave)
     active = db >= db.max() - 40
     level = 10 * np.log10(np.mean(10 ** (db[active] / 10))) if active.any() else -120.0
     gain = 10 ** ((target_dbfs - level) / 20)
     wave = wave * gain
     peak = np.abs(wave).max()
-    return (wave / peak * 0.99 if peak > 0.99 else wave).astype(np.float32)
+    wave = (wave / peak * 0.99 if peak > 0.99 else wave).astype(np.float32)
+    n = min(int(EDGE_FADE_S * SR), len(wave) // 4)
+    if n > 1:
+        ramp = (0.5 - 0.5 * np.cos(np.linspace(0, np.pi, n))).astype(np.float32)
+        wave[:n] *= ramp
+        wave[-n:] *= ramp[::-1]
+    return wave
 
 
 def segments(wave: np.ndarray, seconds: float = 4.0, hop: float | None = None):

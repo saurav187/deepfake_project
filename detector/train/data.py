@@ -11,7 +11,7 @@ from torch.utils.data import Dataset, Sampler
 
 from detector import paths
 from detector.audio import SR, decode, prepare
-from detector.augment import apply_codec, augment
+from detector.augment import apply_codec, augment, edge_silence
 from detector.data.sources import read_bytes
 
 WINDOW_S = 4.0
@@ -57,7 +57,7 @@ class TrainWindows(Dataset):
         rng = np.random.default_rng(seed)
         row = self.rows[index]
         try:
-            window = crop(load_prepared(row), rng)
+            window = crop(edge_silence(load_prepared(row), rng), rng)
         except Exception:
             window = np.zeros(int(WINDOW_S * SR), np.float32)  # counted as a load failure below
             return torch.from_numpy(window), torch.tensor(float(row["label"])), -1

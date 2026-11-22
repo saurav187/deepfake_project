@@ -54,6 +54,34 @@ def add_noise(wave: np.ndarray, rng: np.random.Generator, snr_db: float) -> np.n
     return wave + noise
 
 
+def edge_silence(wave: np.ndarray, rng: np.random.Generator, max_s=0.6, p=0.5) -> np.ndarray:
+    """With probability p, add 0..max_s s of very quiet noise at the start and/or end.
+
+    Applied to genuine and fake recordings alike, after trimming, so the presence
+    of a quiet onset or tail carries no label information (ASVspoof 5 train: only
+    genuine files have edge silence)."""
+    if rng.random() < p:
+        # Random raised-cosine fades (0.1-0.8 s) so how a recording ends carries
+        # no label information either (genuine speech declines at the end).
+        wave = wave.copy()
+        for side in (0, 1):
+            n = min(int(rng.uniform(0.1, 0.8) * SR), len(wave) // 3)
+            if n > 1 and rng.random() < 0.5:
+                ramp = (0.5 - 0.5 * np.cos(np.linspace(0, np.pi, n))).astype(np.float32)
+                if side == 0:
+                    wave[:n] *= ramp
+                else:
+                    wave[-n:] *= ramp[::-1]
+    if rng.random() >= p:
+        return wave
+    level = 10 ** (rng.uniform(-75, -50) / 20)
+    pieces = []
+    for side in ("start", "end"):
+        n = int(rng.uniform(0, max_s) * SR) if rng.random() < 0.75 else 0
+        pieces.append((rng.standard_normal(n) * level).astype(np.float32))
+    return np.concatenate([pieces[0], wave, pieces[1]])
+
+
 def augment(wave: np.ndarray, rng: np.random.Generator, p_codec=0.6, p_noise=0.3, p_gain=0.5):
     """Random chain: gain -> noise -> codec. Returns (wave, description)."""
     steps = []
