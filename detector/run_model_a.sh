@@ -19,6 +19,25 @@ until [[ -f $D/flac_T_aa.tar.ok && -f $D/flac_D_aa.tar.ok ]]; do
     sleep 60
 done
 
+# Wait until the GPU has room, so another job on the GPU (e.g. a smoke test) cannot
+# make an unattended training run fail with out-of-memory. Needs NEED_MIB free on
+# two checks 30 s apart; logs while waiting.
+NEED_MIB=6000
+wait_for_gpu() {
+    local free waited=0
+    while true; do
+        free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits | head -1)
+        if (( free >= NEED_MIB )); then
+            sleep 30
+            free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits | head -1)
+            (( free >= NEED_MIB )) && return
+        fi
+        (( waited % 600 == 0 )) && echo "$(date '+%F %T') waiting for GPU: ${free} MiB free, need ${NEED_MIB} MiB"
+        sleep 60
+        waited=$((waited + 60))
+    done
+}
+
 echo "$(date '+%F %T') building manifest"
 $PY -m detector.data.build_manifest asvspoof5
 echo "$(date '+%F %T') running audit"
@@ -28,7 +47,8 @@ for encoder in wav2vec2-xls-r-300m wavlm-base-plus; do
     out=detector/runs/models/${encoder}_s42
     if [[ -f $out/summary.json ]]; then echo "already trained: $out"; continue; fi
     rm -rf "$out"   # an interrupted run is restarted from scratch
-    echo "$(date '+%F %T') training $encoder seed 42"
+    wait_for_gpu
+    echo "$(date '+%F %T') training $encoder seed 42 ($(nvidia-smi --query-gpu=memory.free --format=csv,noheader) free)"
     $PY -m detector.train.train --encoder "$encoder" --seed 42 --out "$out"
 done
 echo "$(date '+%F %T') MODEL_A_DONE"
