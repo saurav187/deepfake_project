@@ -1,10 +1,12 @@
-# Initial main-pipeline dependencies; pin after environment validation.
-torch
-numpy
-scipy
-scikit-learn
-librosa
-soundfile
-matplotlib
-tqdm
+# Direct dependencies, pinned to the versions of the audited run
+# (pipeline/outputs/audited_v1/full/environment.txt; Python 3.14.7, CUDA 13.2).
+torch==2.15.0
+numpy==2.5.5
+scipy==1.18.1
+scikit-learn==1.9.1
+librosa==1.0.1
+soundfile==0.14.0
+soxr==1.1.0
+matplotlib==3.11.2
 # Optional live microphone input: install sounddevice separately.
+# External AAC/M4A input and call-channel experiments also need the ffmpeg binary.

@@ -1,3 +1,8 @@
+SUPERSEDED HISTORICAL NOTES — do not cite these numbers.
+The 0.963 cross-validated AUC and the accuracy tables below came from a loader that
+returned the wrong rows and from thresholds/checkpoints chosen on test labels.
+See ../REPORT.md for the audited evaluation.
+
 Research Paper Pipeline
 Audio recordings
         ↓

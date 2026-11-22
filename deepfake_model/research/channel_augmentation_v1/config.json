@@ -1,0 +1,87 @@
+{
+  "script_sha256": "3c25b654c8cb9ba407273078c5991eeeb20ccc09e709fe3433e6e2d7dd379ee9",
+  "manifest_sha256": "875b5a7c56f10a1e6b55f6ca251d54d26797561cb97a13858a843bc5a1dde9fd",
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "epochs": 5,
+  "fpr_budget": 0.05,
+  "channels": [
+    "original",
+    "float_pcm_8khz",
+    "mulaw_8khz"
+  ],
+  "train_recordings": 2335,
+  "train_windows": 12984,
+  "dev_recordings": 734,
+  "dev_windows": 5006,
+  "torch": "2.15.0+cu132",
+  "soxr": "1.1.0",
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 5060",
+  "ffmpeg": "ffmpeg version n9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+  "checks": {
+    "baseline_dev_max_abs_diff": 0.0008559798200925561,
+    "native_clean_42_vs_training_formats_v1_max_abs_diff": 6.977054807899563e-06,
+    "native_clean_43_vs_training_formats_v1_max_abs_diff": 2.3481746514453228e-06,
+    "native_clean_44_vs_training_formats_v1_max_abs_diff": 2.207027541278883e-06
+  },
+  "models": [
+    {
+      "arm": "audited_baseline",
+      "seed": 42,
+      "checkpoint": "pipeline/outputs/audited_v1/full/checkpoint.pth",
+      "dev_cutoff": 0.512355148792267,
+      "frozen_threshold": 0.5996407214552164
+    },
+    {
+      "arm": "native_clean",
+      "seed": 42,
+      "checkpoint": "research/channel_augmentation_v1/native_clean_42/checkpoint.pth",
+      "dev_cutoff": 0.4701333940029145,
+      "checkpoint_sha256": "dc12cd3910e0f41096277de4026775c770e1b77570f74ab30bd21cf49aca6a01"
+    },
+    {
+      "arm": "native_clean",
+      "seed": 43,
+      "checkpoint": "research/channel_augmentation_v1/native_clean_43/checkpoint.pth",
+      "dev_cutoff": 0.26247859001159674,
+      "checkpoint_sha256": "b7852eb0bb367bf9e902e68967498a3fead046a6b3df161169547e260c5e3772"
+    },
+    {
+      "arm": "native_clean",
+      "seed": 44,
+      "checkpoint": "research/channel_augmentation_v1/native_clean_44/checkpoint.pth",
+      "dev_cutoff": 0.43823003768920904,
+      "checkpoint_sha256": "a3dec972e6443f11a31672e2b0fb04332dab2742407c4515388513d03c184c48"
+    },
+    {
+      "arm": "channel_aug",
+      "seed": 42,
+      "checkpoint": "research/channel_augmentation_v1/channel_aug_42/checkpoint.pth",
+      "dev_cutoff": 0.7830693125724794,
+      "checkpoint_sha256": "705b21835f66757ec8820b0fff476fc0fb8a7ef977e2cc1cb5799c025a36a177"
+    },
+    {
+      "arm": "channel_aug",
+      "seed": 43,
+      "checkpoint": "research/channel_augmentation_v1/channel_aug_43/checkpoint.pth",
+      "dev_cutoff": 0.37941586971282965,
+      "checkpoint_sha256": "73d983af0825b262bdbf80e0dfed9d553aa13665763cb8d685bce077599d3877"
+    },
+    {
+      "arm": "channel_aug",
+      "seed": 44,
+      "checkpoint": "research/channel_augmentation_v1/channel_aug_44/checkpoint.pth",
+      "dev_cutoff": 0.1400723606348038,
+      "checkpoint_sha256": "9078fcca4851cff4d476233d5ab784ea0b3983506bcd29f4b9a8cd100e4382c7"
+    }
+  ],
+  "timing": {
+    "train_features_s": 31.534449594000762,
+    "dev_features_s": 23.292945090001012,
+    "total_s": 144.41449504400225
+  }
+}
