@@ -11,8 +11,10 @@ Rules (each is a lesson from the legacy pipeline):
   4. In train and in dev separately, only format strata (container, codec,
      rate, channels) containing both labels are kept, then downsampled to one
      common fake fraction, so the stored format cannot encode the label.
-  5. Gate: format metadata must not predict the label in train or dev (AUC of
-     each stratum's fake fraction within 0.5 +/- 0.10). Otherwise exit 1.
+  5. Gates (exit 1 on failure): every source in train and dev has both labels;
+     format metadata does not predict the label within any source, nor in the
+     pooled train/dev mixture weighted as the training sampler draws it (AUC of
+     each stratum's fake fraction within 0.5 +/- 0.10; an undefined AUC fails).
      Duration/silence/level shortcuts are measured and reported as warnings.
 """
 from collections import defaultdict
@@ -156,8 +158,17 @@ def balance_formats(rows):
             for k, v in sorted(strata.items(), key=lambda kv: -sum(kv[1]))]
 
 
-def stratum_auc(rows, features):
-    """In-sample AUC of each format stratum's own fake fraction as the score.
+def sampler_weights(rows):
+    """Weights reproducing the training sampler: every (source, label) cell has
+    equal total weight (detector/train/data.py, BalancedCellSampler)."""
+    counts = defaultdict(int)
+    for r in rows:
+        counts[(r["source"], r["label"])] += 1
+    return np.array([1.0 / counts[(r["source"], r["label"])] for r in rows])
+
+
+def stratum_auc(rows, features, weights=None):
+    """In-sample AUC of each format stratum's own (weighted) fake fraction as the score.
 
     With a handful of categorical strata there is nothing to overfit, and this
     avoids the anti-correlation that cross-validation produces on balanced data.
@@ -165,13 +176,14 @@ def stratum_auc(rows, features):
     y = np.array([r["label"] for r in rows])
     if len(set(y)) < 2:
         return None
+    w = np.ones(len(rows)) if weights is None else np.asarray(weights, dtype=float)
     keys = [tuple(r[k] for k in features) for r in rows]
-    totals = defaultdict(lambda: [0, 0])
-    for k, label in zip(keys, y):
-        totals[k][0] += label
-        totals[k][1] += 1
+    totals = defaultdict(lambda: [0.0, 0.0])
+    for k, label, wi in zip(keys, y, w):
+        totals[k][0] += label * wi
+        totals[k][1] += wi
     score = np.array([totals[k][0] / totals[k][1] for k in keys])
-    return float(roc_auc_score(y, score))
+    return float(roc_auc_score(y, score, sample_weight=w))
 
 
 def grouped_auc(rows, features, categorical):
@@ -218,8 +230,11 @@ def leakage(rows):
             if subset:
                 scopes[f"{source} {name}"] = subset
     for name, subset in scopes.items():
+        pooled = name.endswith("(all sources)")
         report.append(dict(scope=name, n=len(subset), fake_fraction=round(np.mean([r["label"] for r in subset]), 4),
                            format_auc=stratum_auc(subset, FORMAT),
+                           # What training actually sees: the sampler balances every (source, label) cell.
+                           format_auc_sampled=stratum_auc(subset, FORMAT, sampler_weights(subset)) if pooled else None,
                            shortcut_auc=grouped_auc(subset, SHORTCUT, set()),
                            **{f"{k}_auc": grouped_auc(subset, [k], set()) for k in ("speech_s", "lead_silence_s", "trail_silence_s")}))
     return report
@@ -260,9 +275,20 @@ def main():
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(sorted(rows, key=lambda r: r["uid"]))
-    gates = [l for l in leaks if l["scope"].endswith("(all sources)")]
-    passed = all(l["format_auc"] is None or abs(l["format_auc"] - 0.5) <= FORMAT_AUC_LIMIT - 0.5 for l in gates)
-    report = dict(passed=passed, format_auc_limit=FORMAT_AUC_LIMIT, counts=counts(rows),
+    # Gate 1: every source in train and in dev has both labels, or the sampler
+    # cannot balance it and corpus identity becomes the label.
+    missing = [f"{c['source']} {c['role']}" for c in counts(rows)
+               if c["role"] in ("train", "dev") and min(c["genuine"], c["fake"]) == 0]
+    # Gate 2: format cannot predict the label within any source (raw), nor in the
+    # pooled train/dev mixture as the sampler presents it. Undefined AUC fails.
+    margin = FORMAT_AUC_LIMIT - 0.5
+    checks = [(l["scope"], l["format_auc"]) for l in leaks
+              if not l["scope"].endswith("(all sources)") and not l["scope"].endswith(" test")]
+    checks += [(l["scope"] + " [sampled]", l["format_auc_sampled"]) for l in leaks if l["scope"].endswith("(all sources)")]
+    failed = [(name, auc) for name, auc in checks if auc is None or abs(auc - 0.5) > margin]
+    passed = not missing and not failed
+    report = dict(passed=passed, format_auc_limit=FORMAT_AUC_LIMIT, gate_missing_labels=missing,
+                  gate_failed_scopes=[dict(scope=n, format_auc=a) for n, a in failed], counts=counts(rows),
                   exclusions=[dict(source=s, reason=k, n=n) for (s, k), n in sorted(reasons.items())],
                   duplicates=duplicate_stats, format_strata=strata, leakage=leaks,
                   split_plan={g: r for g, r in sorted(split_plan.items())},
@@ -280,10 +306,16 @@ def main():
     print("\nMetadata-only label prediction (grouped-CV AUC; 0.5 = no leak):")
     fmt = lambda v: "  n/a" if v is None else f"{v:.3f}"
     for l in leaks:
-        print(f"  {l['scope']:28} n={l['n']:>7}  format {fmt(l['format_auc'])}  duration/silence/level {fmt(l['shortcut_auc'])}")
+        sampled = f" (sampled {fmt(l['format_auc_sampled'])})" if l.get("format_auc_sampled") is not None else ""
+        print(f"  {l['scope']:28} n={l['n']:>7}  format {fmt(l['format_auc'])}{sampled}  duration/silence/level {fmt(l['shortcut_auc'])}")
     for w in report["warnings"]:
         print(f"WARNING {w}")
-    print(f"\nFormat gate (train and dev format AUC within 0.5 +/- {FORMAT_AUC_LIMIT - 0.5:.2f}): {'PASS' if passed else 'FAIL'}")
+    for name, auc in failed:
+        print(f"GATE FAIL {name}: format AUC {auc}")
+    for name in missing:
+        print(f"GATE FAIL {name}: one label is missing")
+    print(f"\nGates (both labels per source; format AUC within 0.5 +/- {margin:.2f} per source and sampler-weighted pooled): "
+          f"{'PASS' if passed else 'FAIL'}")
     print(f"Wrote {paths.AUDIT / 'manifest.csv'} and report.json")
     sys.exit(0 if passed else 1)
 

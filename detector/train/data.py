@@ -121,14 +121,19 @@ class DevWindows(Dataset):
     def __getitem__(self, index):
         size = int(WINDOW_S * SR)
         try:
-            wave = load_prepared(self.rows[index])
+            wave, _ = decode(read_bytes(self.rows[index]["locator"]))
             if self.channel != "clean":
+                # An upload arrives already encoded, so the codec is applied to the
+                # decoded file before silence trimming and loudness normalisation.
                 wave = apply_codec(wave, self.channel)
+            wave = prepare(wave)
         except Exception:
             return torch.zeros(0, size), index
         if len(wave) < size:
             wave = np.tile(wave, int(np.ceil(size / max(len(wave), 1))))[:size]
-        n = min(self.max_windows, len(wave) // size)
+        # Enough windows to cover the whole recording (the last one ends at the end),
+        # capped at max_windows, so medium-length clips are not scored on their start only.
+        n = min(self.max_windows, int(np.ceil(len(wave) / size)))
         starts = np.linspace(0, len(wave) - size, n).astype(int) if n > 1 else [0]
         return torch.from_numpy(np.stack([wave[s:s + size] for s in starts])), index
 

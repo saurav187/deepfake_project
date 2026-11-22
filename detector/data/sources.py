@@ -65,6 +65,12 @@ def asvspoof5():
                 cols = line.split()
                 speaker, utt, attack, key = cols[0], cols[1], cols[7], cols[8]
                 protocol[utt] = (speaker, attack, key, role)
+    # The dev tars also hold 1,184 track-2 enrollment utterances (genuine speech of
+    # target speakers, no countermeasure label). They are not detection trials.
+    enrollment = set()
+    with open(paths.ASVSPOOF5_PROTOCOLS / "ASVspoof5.dev.track_2.enroll.tsv") as f:
+        for line in f:
+            enrollment.update(line.split()[1].split(","))
     for tar_path in sorted(paths.ASVSPOOF5.glob("flac_[TD]_*.tar")):
         if not Path(f"{tar_path}.ok").exists():
             continue  # still downloading or unverified
@@ -73,6 +79,10 @@ def asvspoof5():
                 if not m.isfile() or not m.name.endswith(".flac"):
                     continue
                 utt = Path(m.name).stem
+                if utt in enrollment:
+                    continue
+                if utt not in protocol:
+                    raise ValueError(f"{tar_path.name}: {utt} is in no ASVspoof 5 protocol")
                 speaker, attack, key, role = protocol[utt]
                 yield Record(uid=f"asvspoof5/{utt}", source="asvspoof5",
                              locator=f"tar:{tar_path}::{m.offset_data}:{m.size}",

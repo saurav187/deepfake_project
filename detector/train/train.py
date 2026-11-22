@@ -11,6 +11,7 @@ Test corpora (In-the-Wild, VA) are never loaded here.
 import argparse
 from collections import Counter, defaultdict
 import csv
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -29,11 +30,17 @@ from detector.train.data import (BalancedCellSampler, DevWindows, TrainWindows, 
                                  dev_subset, load_manifest)
 
 DEV_CHANNELS = ("clean", "mp3_32k")
+MAX_LOAD_FAILURE_FRACTION = 0.01
 # Python 3.14 defaults to forkserver, where every worker re-imports torch and
 # transformers (~1 GB each) and the run was OOM-killed on a 14 GB machine.
 # Workers only decode/augment audio on the CPU and never touch CUDA, so fork
 # is safe and shares the parent's memory copy-on-write.
 WORKER_CONTEXT = "fork"
+
+
+def file_sha256(path):
+    with open(path, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def eer(y, s):
@@ -117,7 +124,12 @@ def main():
                   trainable_params=sum(p.numel() for p in trainable),
                   train_cells={f"{s}/{l}": n for (s, l), n in sorted(cells.items())},
                   dev_recordings=len(dev_rows), dev_channels=DEV_CHANNELS,
-                  audit_report=str(paths.AUDIT / "report.json"))
+                  audit_report=str(paths.AUDIT / "report.json"),
+                  # Freeze the exact inventory: later audit reruns must not change what this run claims.
+                  audit_report_sha256=file_sha256(paths.AUDIT / "report.json"),
+                  audit_manifest_sha256=file_sha256(paths.AUDIT / "manifest.csv"),
+                  train_uids_sha256=hashlib.sha256("\n".join(sorted(r["uid"] for r in train_rows)).encode()).hexdigest(),
+                  dev_uids_sha256=hashlib.sha256("\n".join(r["uid"] for r in dev_rows).encode()).hexdigest())
     (args.out / "config.json").write_text(json.dumps(config, indent=2) + "\n")
 
     history, best, bad = [], np.inf, 0
@@ -126,7 +138,11 @@ def main():
         model.train()
         t0, losses, failures, seen = perf_counter(), [], 0, Counter()
         for wave, y, index in loader:
-            failures += int((index < 0).sum())
+            ok = index >= 0  # a failed load returns index -1; it must not enter the loss
+            failures += int((~ok).sum())
+            if not ok.any():
+                continue
+            wave, y = wave[ok], y[ok]
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
                 logits = model(wave.to(device, non_blocking=True))
             loss = loss_fn(logits.float(), y.to(device))
@@ -138,6 +154,8 @@ def main():
             losses.append(loss.item())
             seen.update(y.long().tolist())
         train_s = perf_counter() - t0
+        if failures > MAX_LOAD_FAILURE_FRACTION * args.steps * args.batch_size:
+            raise SystemExit(f"{failures} training windows failed to load in epoch {epoch}; check the data.")
         t1 = perf_counter()
         metrics, predictions = [], {}
         for channel in DEV_CHANNELS:
