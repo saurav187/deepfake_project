@@ -1,0 +1,3 @@
+codec,genuine_decode_errors,spoof_decode_errors,genuine,false_positives,false_positive_rate,spoof,detected,recall,insufficient
+none,196,2023,1753,1107,0.6314888762122076,15449,10458,0.6769370185772542,0
+ulaw,188,1752,2168,1469,0.6775830258302583,19412,15539,0.8004842365547085,0

@@ -1,0 +1,19 @@
+{
+  "manifest_sha256": "875b5a7c56f10a1e6b55f6ca251d54d26797561cb97a13858a843bc5a1dde9fd",
+  "script_sha256": "7672098d899c7d58be2c6ec9c15a64b01f764a277f20471ebade432112d001f1",
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "sample_seed": 2026,
+  "epochs": 5,
+  "fpr_budget": 0.05,
+  "batch_size": 96,
+  "torch": "2.15.0+cu132",
+  "cuda": "13.2",
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 5060",
+  "train_chunks_per_arm": 12984,
+  "dev_chunks": 5006
+}

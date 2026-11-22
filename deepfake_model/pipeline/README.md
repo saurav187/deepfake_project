@@ -1,6 +1,6 @@
 # Speaker holdout baseline
 
-The active entry points are 01 (manifest and historical crosswalk), 02 (training and one-shot evaluation) and 04 (file, folder and microphone inference). The standalone 03 stabilizer and the old outputs are historical experiments. See [the evaluation report](../REPORT.md) for results and exclusions.
+The active entry points are 01 (manifest and historical crosswalk), 02 (training and one-shot evaluation) and 04 (file, folder and microphone inference). See [the evaluation report](../REPORT.md) for results and exclusions.
 
 From the repository root, use the project's Python environment. The retained run was made with Python 3.14.7 on an RTX 5060, with the versions in `deepfake_model/pipeline/outputs/audited_v1/full/environment.txt`. The local raw corpus and original feature arrays are required to reproduce the historical audit. They are outside Git. Manifest paths are relative to `deepfake_model/datasets/indiefake/`.
 

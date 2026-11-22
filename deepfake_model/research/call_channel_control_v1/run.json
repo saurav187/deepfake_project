@@ -1,0 +1,13 @@
+{
+  "seconds": 10,
+  "positions": [
+    "start",
+    "middle",
+    "end"
+  ],
+  "checkpoint_sha256": "694fab2b361a48b53a5c2f77524fef3c866b483b076d92c24fa10a5c8554a7ff",
+  "rule_sha256": "576956f275436241044204aaedce3c3b633bf085658d19adb33b465b18402cc8",
+  "script_sha256": "ee28e327655d52fd77ba2ef1792c6b2b92e90a97d5fec0c90d429aeecfe19b17",
+  "torch_version": "2.15.0+cu132",
+  "ffmpeg": "ffmpeg version n9.0.2 Copyright (c) 2000-2026 the FFmpeg developers"
+}

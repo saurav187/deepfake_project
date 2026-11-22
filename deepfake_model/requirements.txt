@@ -8,4 +8,3 @@ soundfile
 matplotlib
 tqdm
 # Optional live microphone input: install sounddevice separately.
-# Legacy experiments may additionally require h5py, pandas and Jupyter.

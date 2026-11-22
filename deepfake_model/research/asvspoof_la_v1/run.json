@@ -1,0 +1,20 @@
+{
+  "pilot": false,
+  "archived_flacs_visited": 181566,
+  "selected": 42941,
+  "exact_pcm_matches": 0,
+  "archive_md5_verified": true,
+  "rule": {
+    "aggregation": "mean",
+    "threshold": 0.5996407214552164,
+    "epoch": 2,
+    "dev_auc": 0.9725926922818114,
+    "version": 1,
+    "checkpoint_sha256": "694fab2b361a48b53a5c2f77524fef3c866b483b076d92c24fa10a5c8554a7ff",
+    "manifest_sha256": "875b5a7c56f10a1e6b55f6ca251d54d26797561cb97a13858a843bc5a1dde9fd"
+  },
+  "pcm_format": "mono 16kHz float32",
+  "source": "https://doi.org/10.5281/zenodo.4837263",
+  "keys_url": "https://www.asvspoof.org/asvspoof2021/LA-keys-full.tar.gz",
+  "keys_sha256": "e6eb0889404dc27d568a5a65fd7aeb9cf0538784664f0c3f2996eb9b1ea242b4"
+}

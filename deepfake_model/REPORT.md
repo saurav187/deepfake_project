@@ -51,6 +51,8 @@ The frozen rule ran on all 44 recordings. An alert episode starts whenever the r
 
 Eleven fake files never alerted. Five alerted temporarily and ended REAL. We observed **0 false alert episodes per genuine recording hour**, also zero over **0.843 hours of estimated active audio** (20 ms frames with RMS ≥ −45 dBFS). Speech-only hours require annotations. The rate is based on little exposure, and six long real files dominate it. Duration and source content vary together, so these bins cannot isolate a causal length effect. First-alert timing excludes misses and measures audio position, not hardware latency or delay from the onset of a manipulated segment. Live microphone capture itself was not exercised.
 
+A subsequent decoded-audio audit identified nine training copies among the 22 genuine VA files. Eight genuine recordings with no exact match account for 1.040 hours. The [paired channel probe and provenance audit](docs/CALL_CHANNEL_PROBE.md) give the corrected interpretation of external exposure.
+
 ## Artifacts and reproduction
 
 [New chunk manifest](pipeline/outputs/audited_v1/manifest.csv) · [Historical row crosswalk](pipeline/outputs/audited_v1/historical_manifest.csv) · [Duplicate source evidence](pipeline/outputs/audited_v1/historical_duplicates.csv) · [Audit and undecodable paths](pipeline/outputs/audited_v1/audit.json)

@@ -1,0 +1,13 @@
+family,channel,fake_windows,fake_flagged,genuine_windows,genuine_flagged,insufficient,comparable_pairs,fake_score_higher,median_fake_minus_original
+all,original,45,0,9,0,0,45,40,0.08430436766939237
+all,float_pcm_8khz,45,42,9,7,0,45,26,0.024824148416519254
+all,mulaw_8khz,45,42,9,8,0,45,20,-0.008997723460197449
+linus,original,12,0,3,0,0,12,9,0.05665421160156257
+linus,float_pcm_8khz,12,12,3,3,0,12,10,0.126425638794899
+linus,mulaw_8khz,12,12,3,3,0,12,10,0.10207603126764292
+obama,original,18,0,3,0,0,18,18,0.17361045943107456
+obama,float_pcm_8khz,18,17,3,3,0,18,7,-0.017688710987567857
+obama,mulaw_8khz,18,17,3,3,0,18,2,-0.05299919024109839
+ryan,original,15,0,3,0,0,15,13,0.06726516108319629
+ryan,float_pcm_8khz,15,13,3,1,0,15,9,0.07724782526493079
+ryan,mulaw_8khz,15,13,3,2,0,15,8,0.036429686844348885
