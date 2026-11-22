@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+python-multipart
+pydantic>=2,<3
+pytest
+httpx
+ruff
