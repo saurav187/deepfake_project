@@ -1,0 +1,10 @@
+datasets/*
+!datasets/fetch.sh
+!datasets/progress.sh
+runs/
+*.zip
+*.tar
+*.tar.gz
+*.ok
+*.log
+pretrained/
