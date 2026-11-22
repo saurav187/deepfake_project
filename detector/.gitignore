@@ -1,6 +1,8 @@
 datasets/*
 !datasets/fetch.sh
 !datasets/progress.sh
+!datasets/pdownload.py
+!datasets/resume_T_ab.sh
 runs/
 *.zip
 *.tar
