@@ -12,8 +12,18 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (BaseDocTemplate, CondPageBreak, Frame, KeepTogether, PageBreak, PageTemplate,
-                                Paragraph, Preformatted, Spacer, Table, TableStyle)
+from reportlab.platypus import (
+    BaseDocTemplate,
+    CondPageBreak,
+    Frame,
+    PageBreak,
+    PageTemplate,
+    Paragraph,
+    Preformatted,
+    Spacer,
+    Table,
+    TableStyle,
+)
 from reportlab.platypus.tableofcontents import TableOfContents
 
 OUT = Path(__file__).with_name("4_HOW_THE_PIPELINE_WORKS.pdf")
