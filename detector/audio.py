@@ -114,16 +114,23 @@ def prepare(wave: np.ndarray, target_dbfs: float = -25.0) -> np.ndarray:
     The trim has no margin. In ASVspoof 5 train, genuine files carry leading and
     trailing silence (median 0.16 s / 0.22 s) while fakes have none, so any kept
     margin would leave a quiet onset that marks genuine audio."""
+    return prepare_with_offset(wave, target_dbfs)[0]
+
+
+def prepare_with_offset(wave: np.ndarray, target_dbfs: float = -25.0) -> tuple[np.ndarray, int]:
+    """prepare(), also returning where the prepared audio starts in the input (samples),
+    so timeline segments can be reported at their original positions."""
     start, end = speech_bounds(wave, margin_s=0.0)
     wave = wave[start:end]
     if len(wave) == 0:
-        return wave
+        return wave, start
     # Fakes in ASVspoof 5 train stop abruptly at full level, while genuine speech
     # decays naturally (tail -3.1 vs -7.0 dB re. active level). Dropping 0.25 s at
     # each edge and fading the new edges over 0.15 s brought every edge-level and
     # edge-slope cue to AUC <= 0.60 on a 2,400-recording train sample; dropping
     # more did not help. Short clips lose proportionally less.
     cut = min(EDGE_CUT_S, 0.1 * len(wave) / SR)
+    offset = start + int(cut * SR)
     wave = wave[int(cut * SR): len(wave) - int(cut * SR)]
     db = frame_db(wave)
     active = db >= db.max() - 40
@@ -137,7 +144,20 @@ def prepare(wave: np.ndarray, target_dbfs: float = -25.0) -> np.ndarray:
         ramp = (0.5 - 0.5 * np.cos(np.linspace(0, np.pi, n))).astype(np.float32)
         wave[:n] *= ramp
         wave[-n:] *= ramp[::-1]
-    return wave
+    return wave, offset
+
+
+def window_starts(n_samples: int, size: int, max_windows: int | None = None) -> list[int]:
+    """The one window schedule shared by dev scoring, calibration, evaluation and the app.
+
+    Evenly spaced windows of `size` samples whose union covers the whole recording
+    (the last ends at the end); `max_windows` caps the count (dev uses 4, which
+    covers recordings up to 16 s completely). Callers repeat-pad recordings shorter
+    than one window to `size` first, so n_samples >= size."""
+    n = int(np.ceil(n_samples / size))
+    if max_windows:
+        n = min(n, max_windows)
+    return np.linspace(0, n_samples - size, n).astype(int).tolist() if n > 1 else [0]
 
 
 def segments(wave: np.ndarray, seconds: float = 4.0, hop: float | None = None):
