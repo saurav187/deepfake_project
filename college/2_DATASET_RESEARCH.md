@@ -68,11 +68,11 @@
 ## Codex prompt (for downloading at college)
 
 ```text
-Download training and test datasets for an audio deepfake detector. Read docs/DATASETS_V2.md first; it lists each dataset, its licence and its role.
+Download training and test datasets for an audio deepfake detector. Read college/2_DATASET_RESEARCH.md first; it lists each dataset, its licence and its role.
 
 Rules:
 - Ask me for the destination drive/folder (call it $DATA) before downloading anything, and check its free space with df -h. Never fill a disk past 90%.
-- Download only the subsets in docs/DATASETS_V2.md, with the size targets there. Before each download, list the remote file tree (hf api / modelscope / kaggle), compute the size of what you'll fetch, show me, and wait for OK.
+- Download only the subsets in college/2_DATASET_RESEARCH.md, with the size targets there. Before each download, list the remote file tree (hf api / modelscope / kaggle), compute the size of what you'll fetch, show me, and wait for OK.
 - Gated datasets (MLAAD, Deepfake-Eval-2024) and Kaggle need my login; tell me exactly what to run (hf auth login, ~/.kaggle/kaggle.json).
 - Resumable downloads only (hf download, modelscope download, kaggle). On a stall, retry; don't restart from zero.
 - Don't modify detector/, deepfake_model/ or app/. Don't commit anything. Don't delete anything outside $DATA.
