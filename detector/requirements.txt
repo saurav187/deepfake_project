@@ -1,0 +1,14 @@
+# Runtime packages for the released detector and the app (versions used to build release v1).
+# Install torch first from pytorch.org if you need a specific CPU/CUDA build; see docs/SETUP_LAPTOP.md.
+torch==2.15.0
+transformers==5.24.0
+safetensors==0.8.0
+numpy==2.5.5
+scipy==1.18.1
+scikit-learn==1.9.1
+soundfile==0.14.0
+soxr==1.1.0
+fastapi==0.165.0
+uvicorn==0.54.0
+python-multipart==0.0.34
+pydantic>=2,<3
