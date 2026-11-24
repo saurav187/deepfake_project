@@ -40,6 +40,24 @@ def slices(rows, scores):
         reports[f"{field}/{key}"] = metrics(
             [int(rows[i]["label"]) for i in idx], np.asarray(scores)[idx]
         )
+    for lang in {r["language"] for r in rows if "language" in r}:
+        fakes = [
+            i
+            for i, r in enumerate(rows)
+            if r["language"] == lang and r["domain"] == "unseen" and r["label"] == "1"
+        ]
+        parents = {p for i in fakes for p in rows[i]["parent"].split("|")}
+        controls = [
+            i
+            for i, r in enumerate(rows)
+            if r["language"] == lang
+            and r["label"] == "0"
+            and parents.intersection(r["parent"].split("|"))
+        ]
+        idx = controls + fakes
+        reports[f"language/{lang}/unseen"] = metrics(
+            [int(rows[i]["label"]) for i in idx], np.asarray(scores)[idx]
+        )
     return reports
 
 

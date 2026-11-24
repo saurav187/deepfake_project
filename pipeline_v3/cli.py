@@ -32,7 +32,7 @@ def main():
     p.add_argument("--selection", default="selection.csv")
     p.add_argument("--catalog", default="catalog.csv")
     p.add_argument("--inventory", default="inventory.jsonl")
-    p.add_argument("--heldout", nargs="+", default=["Gemini-3.1-Flash-TTS", "freevc24"])
+    p.add_argument("--heldout", nargs="*", default=["Gemini-3.1-Flash-TTS", "freevc24"])
     p.add_argument("--packed", type=Path)
     p.add_argument("--release", type=Path)
     p.add_argument("--encoder", type=Path)

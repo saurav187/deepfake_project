@@ -84,15 +84,67 @@ def cache(cfg, rows, encoder, tag):
 def pilot(cfg):
     rng = np.random.default_rng(cfg.seed)
     allrows = entries(cfg.local, {"train", "select"})
+    # Replay the family holdout on a final pack that also contains training Gemini.
+    # This restriction applies to feature probes only. The teacher uses the full pack.
+    holdout = {"gemini", "freevc24"}
+    allrows = [
+        dict(r, domain="unseen") if r["generator"] in holdout else r
+        for r in allrows
+        if not (r["split"] == "train" and r["generator"] in holdout)
+    ]
     rows = []
     for split in ("train", "select"):
         for label in ("0", "1"):
             pool = [r for r in allrows if r["split"] == split and r["label"] == label]
-            idx = rng.permutation(len(pool))[
-                : cfg.per_class if split == "train" else cfg.per_class // 2
-            ]
-            rows.extend(pool[i] for i in idx)
-    report = {"selected": dict(Counter(r["split"] for r in rows)), "models": {}}
+            limit = cfg.per_class if split == "train" else cfg.per_class // 2
+            if split == "select":
+                # Sample real parents and their fakes together for language-specific EER.
+                if label == "0":
+                    continue
+                for lang in ("en", "hi"):
+                    controls = {
+                        r["parent"]: r
+                        for r in allrows
+                        if r["language"] == lang
+                        and r["split"] == split
+                        and r["label"] == "0"
+                    }
+                    chosen = {}
+                    for domain in ("unseen", "seen"):
+                        candidates = [
+                            r
+                            for r in pool
+                            if r["language"] == lang
+                            and r["domain"] == domain
+                            and r["parent"] in controls
+                        ]
+                        added = 0
+                        for i in rng.permutation(len(candidates)):
+                            r = candidates[i]
+                            if r["parent"] not in chosen:
+                                chosen[r["parent"]] = r
+                                added += 1
+                                if added >= max(1, limit // 4):
+                                    break
+                    for parent, fake in chosen.items():
+                        rows.extend((controls[parent], fake))
+            else:
+                first = len(rows)
+                for lang in ("en", "hi"):
+                    group = [r for r in pool if r["language"] == lang]
+                    rows.extend(
+                        group[i] for i in rng.permutation(len(group))[: limit // 2]
+                    )
+                used = {r["id"] for r in rows[first:]}
+                rest = [r for r in pool if r["id"] not in used]
+                rows.extend(
+                    rest[i] for i in rng.permutation(len(rest))[: limit - len(used)]
+                )
+    report = {
+        "probe_holdout": sorted(holdout),
+        "selected": dict(Counter(r["split"] for r in rows)),
+        "models": {},
+    }
     for encoder, tag in [(cfg.encoder, "xlsr"), (cfg.small_encoder, "small")]:
         data = cache(cfg, rows, encoder, tag)
         if not data:
@@ -164,7 +216,7 @@ def pilot(cfg):
         o = opus["slices"].get("domain/unseen", {}).get("eer")
         coverage = result["eligible"] / result["selected"]
         languages = [
-            result["slices"].get("language/" + lang, {}).get("eer")
+            result["slices"].get("language/" + lang + "/unseen", {}).get("eer")
             for lang in ("hi", "en")
         ]
         decisions[name] = (

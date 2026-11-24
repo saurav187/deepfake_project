@@ -57,6 +57,21 @@ def audit(local):
         dict(descriptors(payload(local, r)), pair=r["pair"], source=r["source"])
         for r in rows
     ]
+    result = fit_controls(rows, features)
+    result["languages"] = {}
+    for lang in ("en", "hi"):
+        idx = [i for i, r in enumerate(rows) if r["language"] == lang]
+        panel = [rows[i] for i in idx]
+        if {(r["split"], r["label"]) for r in panel} != {
+            (s, y) for s in ("train", "select") for y in ("0", "1")
+        }:
+            raise ValueError(f"Missing real/fake audit cell for {lang}")
+        result["languages"][lang] = fit_controls(panel, [features[i] for i in idx])
+    result["pass"] &= all(item["pass"] for item in result["languages"].values())
+    return result
+
+
+def fit_controls(rows, features):
     train = np.array([r["split"] == "train" for r in rows])
     y = np.array([int(r["label"]) for r in rows])
     reports = {}

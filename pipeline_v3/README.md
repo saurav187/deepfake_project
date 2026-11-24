@@ -1,5 +1,8 @@
 # Train and evaluate the bilingual detector on Colab
 
+**Current English pilot.** The first Drive run produced no English selection or validation pairs. On that Drive, use the [English repair and exact Colab commands](../college/15_ENGLISH_DATA_FIX.md#owner-run-sequence) or [setup notebook](../colab/01_setup_and_data.ipynb) before the pilot. The original publisher selection is the Hindi input to the repaired pack. The existing generic prepare/pack sequence below describes the original corpus only.
+
+
 The source in this branch is sufficient to build a student release after the pilot passes. The trained v1 release is available through `DETECTOR_BACKEND=detector`. A v3 release uses `DETECTOR_BACKEND=v3`. Large inputs and run products belong outside the checkout. Use Linux, Python ≥3.11, preinstalled PyTorch and FFmpeg. The model and APIs need no network during training once weights and shards are present.
 
 ## First three actions
@@ -46,7 +49,8 @@ mount_v3() {
 }
 stage_v3 v3-data prepare
 # Review selection.csv on Drive and resolve missing language, speaker or generator cells.
-stage_v3 v3-data pack
+# On the populated Drive, skip prepare. Use the English repair commands in
+# college/15_ENGLISH_DATA_FIX.md through assemble, catalog and pack.
 colab stop -s v3-data
 
 colab new -s v3-pilot --gpu L4

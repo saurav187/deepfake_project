@@ -40,6 +40,28 @@ def match(data, inventory, selection, heldout, cap=2500):
     root = data / "development"
     with safe_path(root, inventory).open() as f:
         records = [json.loads(line) for line in f]
+    kept, rejected, counts = select(records, heldout, cap)
+    write_selection(safe_path(root, selection), kept)
+    print(
+        json.dumps(
+            {
+                "selected": len(kept),
+                "excluded": rejected,
+                "counts": {"/".join(k): v for k, v in counts.items()},
+            },
+            indent=2,
+        )
+    )
+
+
+def write_selection(dest, kept):
+    with dest.open("x", newline="") as f:
+        w = csv.DictWriter(f, ["archive", "member", *FIELDS])
+        w.writeheader()
+        w.writerows(kept)
+
+
+def select(records, heldout, cap=2500, *, fate=None, voice_rule="legacy"):
     reals = defaultdict(list)
     rejected = Counter()
     for r in records:
@@ -74,18 +96,40 @@ def match(data, inventory, selection, heldout, cap=2500):
     kept = {}
     counts = Counter()
     heldout = {norm(v) for v in heldout}
+    voice_counts = defaultdict(Counter)
+    if voice_rule != "legacy":
+        for row in records:
+            if row["source"] != "mlaad":
+                continue
+            meta = row["metadata"]
+            family = norm(Path(row["archive"]).parent.name)
+            refs = reals.get(("mailabs", Path(meta["original_file"]).stem), [])
+            voice_id = norm(meta.get("reference_speaker")) or "unknown/" + family
+            if len(refs) == 1 and (
+                assign(refs[0][1]) != "train" or family not in heldout
+            ):
+                voice_counts[voice_id][assign(refs[0][1])] += 1
+    voice_folds = {v: max(sorted(c), key=c.get) for v, c in voice_counts.items()}
     for fake in sorted(
         (r for r in records if r["source"] in {"mlaad", "indicsynth"}),
         key=lambda r: short(r["archive"] + "/" + r["member"]),
     ):
+
+        def reason(value, fake=fake):
+            if fate is not None and fake["source"] == "mlaad":
+                fate[fake["archive"]] = value
+
         m = fake["metadata"]
         if fake["source"] == "mlaad":
             src, lang, family = "mailabs", "en", Path(fake["archive"]).parent.name
             parent = m.get("original_file")
             identities = [m.get("reference_speaker")]
+            if voice_rule == "cohort" and not norm(identities[0]):
+                identities = ["unknown:" + norm(family)]
             transcript = m.get("transcript")
             if norm(m.get("is_original_language")) in {"false", "0", "no"}:
                 rejected["translated text"] += 1
+                reason("translated text")
                 continue
         else:
             src, lang, family = "kathbath", "hi", m.get("Generative Model", "")
@@ -99,6 +143,9 @@ def match(data, inventory, selection, heldout, cap=2500):
             or not family
         ):
             rejected["unresolved parent or voice"] += 1
+            reason(
+                "missing/ambiguous parent" if len(ref) != 1 else "missing voice/family"
+            )
             continue
         real, person, realtext = ref[0]
         if lang == "en":
@@ -109,14 +156,24 @@ def match(data, inventory, selection, heldout, cap=2500):
                 voice = rv[0][1]
             elif "/" in voice or voice.endswith((".wav", ".flac")):
                 rejected["unresolved reference audio"] += 1
+                reason("unresolved reference audio")
                 continue
             else:
                 voice = src + "/" + voice
         else:
             voice = src + "/" + str(identities[0]).removesuffix(".0")
         split = assign(person)
-        if assign(voice) != split or (split == "train" and norm(family) in heldout):
+        voice_split = assign(voice)
+        if lang == "en" and voice_rule != "legacy":
+            key = norm(m.get("reference_speaker")) or "unknown/" + norm(family)
+            voice_split = voice_folds.get(key)
+        if voice_split != split or (split == "train" and norm(family) in heldout):
             rejected["reserved speaker or family"] += 1
+            reason(
+                "held family"
+                if split == "train" and norm(family) in heldout
+                else "voice in other fold"
+            )
             continue
         realid = short(real["archive"] + "/" + real["member"])
         fakeid = short(fake["archive"] + "/" + fake["member"])
@@ -126,14 +183,17 @@ def match(data, inventory, selection, heldout, cap=2500):
             ownership.get(t, split) != split for t in {textid, realtext} if t
         ):
             rejected["missing or crossing prompt"] += 1
+            reason("missing or crossing prompt")
             continue
         cell = (lang, split, norm(family))
         if counts[cell] >= cap:
+            reason("cap")
             continue
         # A reused real must keep all text keys of its associated utterance family.
         realkey = realtext or textid
         if realid in kept and kept[realid]["text"] != realkey:
             rejected["inconsistent original transcript"] += 1
+            reason("inconsistent original transcript")
             continue
         for t in {textid, realkey}:
             ownership[t] = split
@@ -167,20 +227,7 @@ def match(data, inventory, selection, heldout, cap=2500):
                 "generator": gen,
                 "domain": dom,
             }
+        reason("kept")
         counts[cell] += 1
     check(list(kept.values()))
-    dest = safe_path(root, selection)
-    with dest.open("x", newline="") as f:
-        w = csv.DictWriter(f, ["archive", "member", *FIELDS])
-        w.writeheader()
-        w.writerows(kept.values())
-    print(
-        json.dumps(
-            {
-                "selected": len(kept),
-                "excluded": rejected,
-                "counts": {"/".join(k): v for k, v in counts.items()},
-            },
-            indent=2,
-        )
-    )
+    return list(kept.values()), rejected, counts

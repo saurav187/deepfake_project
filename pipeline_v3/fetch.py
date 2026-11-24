@@ -15,6 +15,7 @@ MINIMUM = {
     "indicvoices": 2.935,
 }
 EXTRAS = {
+    "libri-dev": 0.652,
     "shrutilipi": 0.990,
     "voxenes": 19.847,
     "deepfake-eval": 4.066,
@@ -24,6 +25,42 @@ ENCODERS = {
     "xlsr": "facebook/wav2vec2-xls-r-300m",
     "wavlm-base": "microsoft/wavlm-base-plus",
 }
+
+
+LIBRI = {
+    "dev-clean": "76f87d090650617fca0cac8f88b9416e0ebf80350acb97b343a85fa903728ab3",
+    "dev-other": "12661c48e8c3fe1de2c1caa4c3e135193bfb1811584f11f569dd12645aa84365",
+}
+
+
+def fetch_libri(data):
+    from tempfile import TemporaryDirectory
+
+    from .data import digest
+
+    dest = data / "development" / "librispeech"
+    dest.mkdir(parents=True, exist_ok=True)
+    for subset, expected in LIBRI.items():
+        path = dest / (subset + ".tar.gz")
+        if path.exists() and digest(path) == expected:
+            continue
+        with TemporaryDirectory(dir=dest) as work:
+            tmp = Path(work) / path.name
+            subprocess.run(
+                [
+                    "curl",
+                    "-fL",
+                    "--retry",
+                    "3",
+                    "-o",
+                    str(tmp),
+                    "https://www.openslr.org/resources/12/" + path.name,
+                ],
+                check=True,
+            )
+            if digest(tmp) != expected:
+                raise ValueError(f"Checksum failed for {path.name}")
+            tmp.replace(path)
 
 
 def main():
@@ -45,6 +82,9 @@ def main():
         json.dumps(
             {
                 "files": selected,
+                "libri_archives": [s + ".tar.gz" for s in LIBRI]
+                if "libri-dev" in selected
+                else [],
                 "archived_audio_GB": sum(sizes.get(s, 0) for s in selected),
                 "model_budget_extra_GB": sum(
                     2 if s in ENCODERS else 0 for s in selected
@@ -57,7 +97,9 @@ def main():
     if args.dry_run:
         return
     args.data.mkdir(parents=True, exist_ok=True)
-    audio = [s for s in selected if s in sizes]
+    if "libri-dev" in selected:
+        fetch_libri(args.data)
+    audio = [s for s in selected if s in sizes and s != "libri-dev"]
     if audio:
         script = Path(__file__).resolve().parents[1] / "college" / "DOWNLOAD_PLAN.sh"
         subprocess.run(

@@ -14,6 +14,12 @@ from pathlib import Path
 from .data import safe_path
 
 
+def generated_path(job):
+    key = hashlib.sha256(json.dumps(job, sort_keys=True).encode()).hexdigest()[:12]
+    ext = ".mp3" if job["engine"] == "edge" else ".wav"
+    return Path("generated") / (job["id"] + "-" + key + ext)
+
+
 def run_job(job, path, root):
     engine, text, voice, lang = [
         job[k] for k in ("engine", "text", "voice", "language")
@@ -112,6 +118,8 @@ def main():
         jobs = list(csv.DictReader(f))
     totals = {}
     unique = set()
+    pending = []
+    all_characters = {}
     for j in jobs:
         if (
             j["engine"] not in {"azure", "gemini", "edge", "xtts", "chatterbox"}
@@ -125,13 +133,22 @@ def main():
         if j["id"] in unique or not j["id"].replace("-", "").isalnum():
             raise ValueError("Invalid or repeated job id")
         unique.add(j["id"])
+        all_characters[j["engine"]] = all_characters.get(j["engine"], 0) + len(
+            j["text"]
+        )
+        path = root / generated_path(j)
+        if path.is_file() and path.stat().st_size:
+            continue
+        pending.append(j)
         totals[j["engine"]] = totals.get(j["engine"], 0) + len(j["text"])
-    seconds = sum(float(j["seconds"]) for j in jobs if j["engine"] == "gemini")
+    seconds = sum(float(j["seconds"]) for j in pending if j["engine"] == "gemini")
     print(
         json.dumps(
             {
                 "jobs": len(jobs),
-                "characters": totals,
+                "pending_jobs": len(pending),
+                "pending_characters": totals,
+                "characters": all_characters,
                 "gemini_output_usd_at_20_per_million": seconds * 0.0005,
                 "gemini_input_usd_estimate": totals.get("gemini", 0) / 2 / 1e6,
                 "local_gpu_hours_estimate": [0.5, 2]
@@ -144,12 +161,8 @@ def main():
         return
     out = root / "generated"
     out.mkdir(exist_ok=True)
-    for j in jobs:
-        key = hashlib.sha256(json.dumps(j, sort_keys=True).encode()).hexdigest()[:12]
-        ext = ".mp3" if j["engine"] == "edge" else ".wav"
-        path = out / (j["id"] + "-" + key + ext)
-        if path.exists():
-            continue
+    for j in pending:
+        path = root / generated_path(j)
         with tempfile.TemporaryDirectory(dir=out) as stage:
             tmp = Path(stage) / path.name
             run_job(j, tmp, root)

@@ -34,12 +34,24 @@ def catalog(data, selection, out):
         groups[archive].append(r)
         r["path"] = (
             str(archive.relative_to(root))
-            if r["member"] == "-"
+            if r["member"] == "-" and r["pair"] != "libri-stock"
             else f"selected/{r['id']}.audio"
         )
     check(rows)
 
     def write(r, b):
+        if r["pair"] == "libri-stock":
+            import io
+            import wave
+
+            from .audio import SR, decode
+
+            samples = (decode(b).clip(-1, 32767 / 32768) * 32768).round().astype("<i2")
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wav:
+                wav.setparams((1, 2, SR, 0, "NONE", ""))
+                wav.writeframes(samples.tobytes())
+            b = buf.getvalue()
         target = safe_path(root, r["path"])
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
@@ -56,6 +68,9 @@ def catalog(data, selection, out):
         if all(r["member"] == "-" for r in items):
             if not archive.is_file():
                 raise FileNotFoundError(archive)
+            for r in items:
+                if r["pair"] == "libri-stock":
+                    write(r, archive.read_bytes())
             continue
         wanted = {r["member"]: r for r in items}
         if len(wanted) != len(items):
