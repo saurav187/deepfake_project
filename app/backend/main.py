@@ -23,6 +23,9 @@ logger = logging.getLogger('uvicorn.error')
 
 def create_app(settings: Settings | None = None):
     settings = settings or Settings.from_env()
+    duration_probe = probe_duration
+    if settings.backend == "v3":
+        from pipeline_v3.media import probe_duration as duration_probe
 
     @asynccontextmanager
     async def lifespan(app):
@@ -104,7 +107,7 @@ def create_app(settings: Settings | None = None):
         if Path(filename).suffix.lower() not in EXTENSIONS:
             raise ApiError(400, 'unsupported_type', UNREADABLE)
         try:
-            duration = await run_in_threadpool(probe_duration, data, filename)
+            duration = await run_in_threadpool(duration_probe, data, filename)
         except (ValueError, OSError):
             raise ApiError(422, 'unreadable', UNREADABLE) from None
         if duration > settings.max_duration_s:

@@ -214,7 +214,8 @@ def test_model_health_and_headers(client):
     assert client.get('/api/health').json() == {'status': 'ok', 'model_loaded': True}
 
 
-def test_missing_detector(fixtures, caplog):
+def test_missing_detector(fixtures, caplog, monkeypatch):
+    monkeypatch.setattr("app.backend.detectors.registry.find_spec", lambda name: None)
     with TestClient(create_app(replace(Settings(), backend='detector'))) as client:
         assert client.get('/api/health').json() == {'status': 'ok', 'model_loaded': False}
         response = upload(client, fixtures, 'sample.wav')

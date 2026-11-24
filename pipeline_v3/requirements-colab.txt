@@ -1,0 +1,4 @@
+# Colab supplies torch, numpy, scipy, scikit-learn and FFmpeg.
+transformers>=4.45,<5
+huggingface-hub>=0.26,<1
+pyarrow>=15

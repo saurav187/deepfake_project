@@ -17,6 +17,10 @@ def load_backend(settings: Settings) -> Detector:
         from .legacy import LegacyDetector
 
         return LegacyDetector(settings.device)
+    if settings.backend == 'v3':
+        from pipeline_v3.release import load_detector
+
+        return load_detector()
     if settings.backend == 'detector':
         try:
             spec = find_spec('detector.inference')
@@ -28,4 +32,4 @@ def load_backend(settings: Settings) -> Detector:
         if not callable(getattr(module, 'load_detector', None)):
             raise BackendUnavailable('detector.inference must expose load_detector().')
         return module.load_detector()
-    raise BackendUnavailable('DETECTOR_BACKEND must be mock, legacy, or detector.')
+    raise BackendUnavailable('DETECTOR_BACKEND must be mock, legacy, detector, or v3.')
