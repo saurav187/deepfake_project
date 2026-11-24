@@ -35,7 +35,7 @@
 |---|---|---|---|---|
 | 13 | Meng et al., *MSLA-XLS-R: enhancing hierarchical SSL representations* | Computer Speech & Language 2027 | **H** | Fine-tuned XLS-R; **ITW EER 6.83 %**. Lower-to-middle layers carry the most deepfake information, which matches our learned layer weights (layers 4, 6, 10) |
 | 55 | Wang et al., *Gaussian attention for adapter-based fine-tuning of WavLM* | Int. J. Intelligent Systems 2026 | **H** | Adapters (parameter-efficient fine-tuning); **ITW 6.11 %**. Robust to codec/noise. A v2 option |
-| 15 | *LHCC: cross-domain detection via acoustic + semantic consistency fusion* | Information Fusion 2026 | **H** | **ITW 7.1 %** cross-domain, but **0.03 %** in-domain. In-domain numbers are inflated |
+| 15 | *LHCC: cross-domain detection via acoustic + semantic consistency fusion* | Information Fusion 2026 | **H** | **ITW 7.1 %** cross-domain with a **frozen** XLS-R backbone plus ~40M task parameters, but **0.03 %** in-domain. In-domain numbers are inflated |
 | 5 | Wang et al., *MWAADD: multi-feature wavelet attention* (XLS-R + emotion features) | Knowledge-Based Systems 2026 | H | **ITW 9.08 %**; plain SSL baselines about 24–30 % on ITW |
 | 12 | *NSF-PINN: physics-informed source-filter decomposition + sharpness-aware training* (WavLM) | CVIU 2026 | H | **ITW 19.4 %**. Sharpness (SAM) linked to poor generalisation |
 | 41 | Jin et al., *Wave-spectrogram cross-modal aggregation* | conference 2025/26 | H | **ITW 6.58 %**; combines waveform and spectrogram views |
@@ -56,7 +56,7 @@
 | 36 | *BTS-E: breathing-talking-silence encoder* | ICASSP 2023 | H (critical) | Uses silence and breathing as evidence. **Contrast with our finding** that silence is a dataset shortcut |
 | 7 | Zhan et al., *Spectral fusion + dual-branch Conformer* | Applied Soft Computing 2027 | M | Evaluates on ASVspoof 5 and ITW |
 | 4 | *Splicing detection and localization for speech deepfakes* | CVIU 2026 | M | Partially fake audio; relates to our per-window timeline |
-| 34 | *VeriVoice: depthwise frequency convolutions (GEAT)* | DECoN 2025 | M | **Built its own dataset with OpenVoice clones** (32 speakers); ITW 24.32 %. A template for our own-dataset step |
+| 34 | *VeriVoice: depthwise frequency convolutions (GEAT)* | DECoN 2025 | M | **Built its own dataset with OpenVoice clones** (32 speakers); 99.66 % accuracy on its own data (the 24.32 % in the paper is a cited RawNet2 baseline on ASVspoof 2021, not an In-the-Wild result). A template for our own-dataset step |
 
 ## D. Handcrafted features and CNN/RNN classifiers (classic approach)
 
@@ -109,18 +109,17 @@
 | WavLM + Gaussian-attention adapters (#55) | WavLM, fine-tuned (adapters) | ASVspoof 2019 LA | 6.11 % |
 | Wave-spectrogram aggregation (#41) | – | ASVspoof 2019 LA | 6.58 % |
 | MSLA-XLS-R (#13) | XLS-R, fine-tuned | ASVspoof 2019 LA | 6.83 % |
-| LHCC (#15) | SSL fusion | ASVspoof 2019 LA | 7.1 % |
+| LHCC (#15) | XLS-R **frozen** + ~40M-parameter fusion head | ASVspoof 2019 LA | 7.1 % |
 | MWAADD (#5) | XLS-R + emotion | ASVspoof 2019 LA | 9.08 % |
 | SIGNL (#18) | graph | CFAD | 10.16 % |
 | **This project, v1** | **XLS-R, frozen; 3-seed ensemble** | **ASVspoof 5 + IndieFake** | **11.3 %** (95 % CI 8.9–13.5) |
 | NSF-PINN (#12) | WavLM | ASVspoof 2019 LA | 19.4 % |
-| VeriVoice (#34) | – | own OpenVoice set | 24.32 % |
 | Plain SSL baselines (cited in #5) | various | ASVspoof 2019 LA | ≈ 24–30 % |
 | Legacy model of this project | CNN-LSTM, from scratch | ASVspoof 2019 | 23.4 % |
 
 **How to read it honestly:**
 1. **The rows are not perfectly comparable.** Others usually train on ASVspoof 2019 LA and report EER over all ITW clips. v1 trains on ASVspoof 5 + IndieFake, excludes clips with under 1 s of speech, and reports speaker-clustered confidence intervals.
-2. **The best systems all fine-tune the SSL encoder** (fully or with adapters); v1 keeps it frozen. This is the strongest literature evidence for the v2 "fine-tune or adapters" decision.
+2. **Most of the best systems adapt the SSL encoder** (#13 fine-tuned, #55 adapters), but #15 reaches 7.1 % with a **frozen** XLS-R and a large (~40M-parameter) head. So both 'adapt the encoder' and 'a much bigger head on a frozen encoder' are supported; v1's head is tiny (183K). Compare both in the pilot/teacher experiments.
 3. **In-domain ITW results** (#15 at 0.03 %, #16 at 0.029, #57 at 98.4 % accuracy) come from random splits of ITW itself and **don't** show generalisation.
 
 ## Gaps across the literature (use them for the problem statement)
@@ -142,3 +141,5 @@ These are the foundations reviewers and mentors expect to see cited:
 - Jung et al., *AASIST* (ICASSP 2022) and Tak et al., *RawBoost* (ICASSP 2022).
 - Babu et al., *XLS-R* (Interspeech 2022): the encoder we use.
 - Dataset papers: **MLAAD**, **SpeechFake** (ACL 2025), **Deepfake-Eval-2024**, **VoxENES 2026**, **IndieFake**, **IndicSynth** (see `2_DATASET_RESEARCH.md`).
+
+*Corrected 25 Nov 2026 after Codex's full-text check (college/9_PAPER_ANALYSIS.md): #34's 24.32 % and the claim that all top systems fine-tune the encoder.*

@@ -91,6 +91,10 @@ def main():
     p.add_argument("--patience", type=int, default=4, help="stop after this many epochs without dev improvement")
     p.add_argument("--dev-per-cell", type=int, default=400, help="dev recordings per (source, label, attack)")
     p.add_argument("--workers", type=int, default=min(6, max(2, (os.cpu_count() or 4) - 2)))
+    p.add_argument("--rate-roundtrip-p", type=float, default=0.0,
+                   help="probability of a random sample-rate round trip per training recording (both labels)")
+    p.add_argument("--lowpass-p", type=float, default=0.0,
+                   help="probability of a random 4-7.5 kHz low-pass per training window (both labels)")
     p.add_argument("--smoke", action="store_true", help="tiny run to test the pipeline end to end")
     args = p.parse_args()
     if args.smoke:
@@ -115,7 +119,7 @@ def main():
                                                     pct_start=0.1)
     loss_fn = torch.nn.BCEWithLogitsLoss()  # classes are balanced by the sampler
     sampler = BalancedCellSampler(train_rows, args.steps, args.batch_size, args.seed)
-    loader = DataLoader(TrainWindows(train_rows), batch_size=args.batch_size, sampler=sampler,
+    loader = DataLoader(TrainWindows(train_rows, rate_roundtrip_p=args.rate_roundtrip_p, lowpass_p=args.lowpass_p), batch_size=args.batch_size, sampler=sampler,
                         num_workers=args.workers, pin_memory=True, persistent_workers=True, prefetch_factor=4,
                         multiprocessing_context=WORKER_CONTEXT)
 

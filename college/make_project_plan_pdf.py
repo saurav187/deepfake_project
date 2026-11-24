@@ -79,8 +79,8 @@ H2("2.2 The gaps — evidence from the papers")
 T([["#", "Gap", "Evidence in your papers"],
    ["G1", "<b>Lab results do not transfer to real-world audio.</b>",
     "Most papers report near-perfect EER on ASVspoof 2019 LA (often under 1 %). On the unseen In-the-Wild set, errors are 6–30 %: "
-    "#13 6.8 %, #15 7.1 %, #5 9.1 %, #18 10.2 %, #12 19.4 %, #34 24.3 %; plain SSL baselines about 24–30 % (cited in #5). "
-    "#34 reaches 99.7 % accuracy on its own data but 24.3 % EER on In-the-Wild."],
+    "#13 6.8 %, #15 7.1 %, #5 9.1 %, #18 10.2 %, #12 19.4 %, #11 26.1 %, #3 28.6 %; plain SSL baselines about 24–30 % (cited in #5). "
+    "#3 reaches 1.98 % EER inside In-the-Wild but 28.55 % when trained on ASVspoof 2019 and tested on it."],
    ["G2", "<b>Modern (2024–26) generators are rarely tested.</b>",
     "Only #18 tests CosyVoice 2 (187 official samples) and #34 builds an OpenVoice set; #32 shows codec-based synthesis "
     "(CosyVoice2, Chatterbox, Mimi/EnCodec tokens) blurs the real/fake boundary."],
@@ -155,17 +155,17 @@ T([["Method (paper)", "Front-end", "Trained on", "In-the-Wild EER"],
    ["Gaussian-attention adapters (#55)", "WavLM, adapters", "ASVspoof 2019 LA", "6.11 %"],
    ["Wave–spectrogram aggregation (#41)", "waveform + spectrogram", "ASVspoof 2019 LA", "6.58 %"],
    ["MSLA-XLS-R (#13)", "XLS-R, fine-tuned", "ASVspoof 2019 LA", "6.83 %"],
-   ["LHCC (#15)", "SSL acoustic + semantic", "ASVspoof 2019 LA", "7.1 %"],
+   ["LHCC (#15)", "XLS-R frozen + ~40M head", "ASVspoof 2019 LA", "7.1 %"],
    ["MWAADD (#5)", "XLS-R + emotion", "ASVspoof 2019 LA", "9.08 %"],
    ["SIGNL (#18)", "graph, 5 % labels", "CFAD", "10.16 %"],
    ["<b>This project, v1 pilot</b>", "<b>XLS-R, frozen; 3 heads</b>", "<b>ASVspoof 5 + IndieFake</b>", "<b>11.3 % [8.9–13.5]</b>"],
    ["NSF-PINN (#12)", "WavLM + physics losses", "ASVspoof 2019 LA", "19.4 %"],
-   ["VeriVoice (#34)", "spectral + transformer", "own OpenVoice set", "24.32 %"],
+   ["Multi-cepstral MLP (#3)", "MFCC+LFCC+CQCC+GFCC", "ASVspoof 2019 LA", "28.55 %"],
    ["Earlier legacy model (this project)", "CNN-LSTM from scratch", "ASVspoof 2019", "23.4 %"]],
   [5.0, 4.0, 3.9, 3.5])
 box("Write the caveats next to the table: training data differ, v1 excludes clips with under 1 s of speech and reports "
     "speaker-clustered intervals, and in-domain In-the-Wild numbers (#15, #16, #57) are not comparable. "
-    "The pattern is still clear: <b>every system that beats v1 adapts the SSL encoder</b> — this is the literature basis for RQ2.", "warn")
+    "The pattern: most systems that beat v1 <b>adapt the SSL encoder</b> (#13, #55), and #15 does it with a frozen encoder but a ~40M-parameter head (v1's is 183K). Both routes are tested in RQ2.", "warn")
 H2("3.5 Critical observations to make (this is what makes a review good)")
 B("<b>Benchmarks are aging.</b> Most papers still train and test on ASVspoof 2019 (generators from 2019). Only a few use "
   "ASVspoof 5 (#7, #21, #18). Modern generators are almost absent (G2).",

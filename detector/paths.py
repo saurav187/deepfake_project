@@ -1,4 +1,8 @@
-"""Filesystem locations. Large data and run outputs stay out of Git."""
+"""Filesystem locations. Large data and run outputs stay out of Git.
+
+DETECTOR_AUDIT overrides the audit directory, so an experimental audit never replaces
+the one a frozen release was calibrated against."""
+import os
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -14,4 +18,4 @@ INDIEFAKE = LEGACY / "datasets" / "indiefake"
 VA_DATASET = LEGACY / "datasets" / "va_dataset"
 
 MANIFESTS = RUNS / "manifests"
-AUDIT = RUNS / "audit"
+AUDIT = Path(os.getenv("DETECTOR_AUDIT", RUNS / "audit")).resolve()

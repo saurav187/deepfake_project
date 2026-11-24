@@ -1,6 +1,10 @@
 """Merge source manifests into one audited manifest with splits and exclusions.
 
-Usage (repo root):  venv/bin/python -m detector.data.audit
+Usage (repo root):  venv/bin/python -m detector.data.audit [--rate-masked SOURCE ...]
+
+--rate-masked: for these sources the stored sample rate does not define a format stratum.
+Only valid together with training-time rate round trips on both labels
+(train --rate-roundtrip-p), which give every recording the same resampling history.
 
 Rules (each is a lesson from the legacy pipeline):
   1. Undecodable files, or files with under MIN_SPEECH_S of speech, are excluded.
@@ -38,6 +42,7 @@ MIN_PER_LABEL_IN_STRATUM = 20
 FORMAT_AUC_LIMIT = 0.60
 SHORTCUT_AUC_WARN = 0.70
 FORMAT = ["container", "subtype", "rate", "channels"]
+RATE_MASKED = set()   # set from --rate-masked; see the module docstring
 SHORTCUT = ["stored_duration_s", "speech_s", "lead_silence_s", "trail_silence_s", "peak_dbfs", "active_dbfs"]
 
 
@@ -251,8 +256,23 @@ def counts(rows):
             for (s, role), v in sorted(table.items())]
 
 
+def mask_rates(rows):
+    """Add rate_key: the stored rate, or 'any' for --rate-masked sources, and use it as
+    the rate component of FORMAT. The manifest keeps the true stored rate."""
+    global FORMAT
+    for r in rows:
+        r["rate_key"] = "any" if r["source"] in RATE_MASKED else r["rate"]
+    FORMAT = ["container", "subtype", "rate_key", "channels"]
+
+
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rate-masked", nargs="*", default=[], help="sources whose stored sample rate is masked")
+    RATE_MASKED.update(ap.parse_args().rate_masked)
     rows = load()
+    if RATE_MASKED:
+        mask_rates(rows)
     if not rows:
         sys.exit("No manifests found. Run: venv/bin/python -m detector.data.build_manifest")
     for r in rows:
@@ -287,7 +307,7 @@ def main():
     checks += [(l["scope"] + " [sampled]", l["format_auc_sampled"]) for l in leaks if l["scope"].endswith("(all sources)")]
     failed = [(name, auc) for name, auc in checks if auc is None or abs(auc - 0.5) > margin]
     passed = not missing and not failed
-    report = dict(passed=passed, format_auc_limit=FORMAT_AUC_LIMIT, gate_missing_labels=missing,
+    report = dict(passed=passed, format_auc_limit=FORMAT_AUC_LIMIT, rate_masked_sources=sorted(RATE_MASKED), gate_missing_labels=missing,
                   gate_failed_scopes=[dict(scope=n, format_auc=a) for n, a in failed], counts=counts(rows),
                   exclusions=[dict(source=s, reason=k, n=n) for (s, k), n in sorted(reasons.items())],
                   duplicates=duplicate_stats, format_strata=strata, leakage=leaks,

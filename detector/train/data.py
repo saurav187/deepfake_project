@@ -11,7 +11,7 @@ from torch.utils.data import Dataset, Sampler
 
 from detector import paths
 from detector.audio import SR, decode, prepare
-from detector.augment import apply_codec, augment, edge_silence
+from detector.augment import ROUNDTRIP_RATES, apply_codec, augment, edge_silence, rate_roundtrip
 from detector.data.sources import read_bytes
 
 WINDOW_S = 4.0
@@ -45,9 +45,11 @@ def crop(wave, rng, size=int(WINDOW_S * SR)):
 
 class TrainWindows(Dataset):
     """Item = (index, epoch-specific seed). Returns one augmented 4 s window."""
-    def __init__(self, rows, augment_p=1.0):
+    def __init__(self, rows, augment_p=1.0, rate_roundtrip_p=0.0, lowpass_p=0.0):
         self.rows = rows
+        self.lowpass_p = lowpass_p
         self.augment_p = augment_p
+        self.rate_roundtrip_p = rate_roundtrip_p
 
     def __len__(self):
         return len(self.rows)
@@ -57,12 +59,15 @@ class TrainWindows(Dataset):
         rng = np.random.default_rng(seed)
         row = self.rows[index]
         try:
-            window = crop(edge_silence(load_prepared(row), rng), rng)
+            wave, _ = decode(read_bytes(row["locator"]))
+            if self.rate_roundtrip_p and rng.random() < self.rate_roundtrip_p:   # both labels alike (see augment.rate_roundtrip)
+                wave = rate_roundtrip(wave, int(rng.choice(ROUNDTRIP_RATES)))
+            window = crop(edge_silence(prepare(wave), rng), rng)
         except Exception:
             window = np.zeros(int(WINDOW_S * SR), np.float32)  # counted as a load failure below
             return torch.from_numpy(window), torch.tensor(float(row["label"])), -1
         if rng.random() < self.augment_p:
-            window, _ = augment(window, rng)
+            window, _ = augment(window, rng, p_lowpass=self.lowpass_p)
         return torch.from_numpy(np.ascontiguousarray(window)), torch.tensor(float(row["label"])), index
 
 
@@ -122,7 +127,11 @@ class DevWindows(Dataset):
         size = int(WINDOW_S * SR)
         try:
             wave, _ = decode(read_bytes(self.rows[index]["locator"]))
-            if self.channel != "clean":
+            if self.channel.startswith("rt"):
+                # Control channel, e.g. "rt24k": resample round trip only. A model that
+                # learned the stored sample rate would flag genuine audio here.
+                wave = rate_roundtrip(wave, int(self.channel[2:-1]) * 1000)
+            elif self.channel != "clean":
                 # An upload arrives already encoded, so the codec is applied to the
                 # decoded file before silence trimming and loudness normalisation.
                 wave = apply_codec(wave, self.channel)

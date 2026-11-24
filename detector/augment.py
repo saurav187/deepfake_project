@@ -43,6 +43,19 @@ def apply_codec(wave: np.ndarray, name: str) -> np.ndarray:
     return out
 
 
+ROUNDTRIP_RATES = (22050, 24000, 32000, 44100, 48000)
+
+
+def rate_roundtrip(wave: np.ndarray, rate: int) -> np.ndarray:
+    """Resample 16 kHz audio to `rate` and back. Applied to both labels at random, it gives
+    every recording a resampling history, so a stored rate (e.g. TTS output at 24 kHz)
+    cannot be told apart by the filter traces of the decode-time resampling."""
+    import soxr
+    up = soxr.resample(wave, SR, rate, quality="HQ")
+    out = soxr.resample(up, rate, SR, quality="HQ").astype(np.float32)
+    return out[: len(wave)] if len(out) >= len(wave) else np.pad(out, (0, len(wave) - len(out)))
+
+
 def add_noise(wave: np.ndarray, rng: np.random.Generator, snr_db: float) -> np.ndarray:
     """White or pink-ish (integrated) noise at the given SNR."""
     noise = rng.standard_normal(len(wave)).astype(np.float32)
@@ -82,9 +95,23 @@ def edge_silence(wave: np.ndarray, rng: np.random.Generator, max_s=0.6, p=0.5) -
     return np.concatenate([pieces[0], wave, pieces[1]])
 
 
-def augment(wave: np.ndarray, rng: np.random.Generator, p_codec=0.6, p_noise=0.3, p_gain=0.5):
-    """Random chain: gain -> noise -> codec. Returns (wave, description)."""
+def lowpass(wave: np.ndarray, cutoff_hz: float) -> np.ndarray:
+    """8th-order Butterworth low-pass, zero phase."""
+    from scipy.signal import butter, sosfiltfilt
+    sos = butter(8, cutoff_hz, btype="low", fs=SR, output="sos")
+    return sosfiltfilt(sos, wave).astype(np.float32)
+
+
+def augment(wave: np.ndarray, rng: np.random.Generator, p_codec=0.6, p_noise=0.3, p_gain=0.5, p_lowpass=0.0):
+    """Random chain: [low-pass] -> gain -> noise -> codec. Returns (wave, description).
+
+    p_lowpass (default off, as in release v1) removes a random top band from both labels,
+    so energy above 4-7.5 kHz, which differs between recording setups, is unreliable evidence."""
     steps = []
+    if p_lowpass and rng.random() < p_lowpass:
+        cutoff = rng.uniform(4000, 7500)
+        wave = lowpass(wave, cutoff)
+        steps.append(f"lowpass{cutoff / 1000:.1f}k")
     if rng.random() < p_gain:
         db = rng.uniform(-8, 4)
         wave = wave * 10 ** (db / 20)

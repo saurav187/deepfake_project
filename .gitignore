@@ -31,3 +31,9 @@ BUNDLE_SHA256SUMS
 
 # Downloaded research papers (copyrighted PDFs)
 papers/
+
+# Local test audio (never commit audio)
+app_testing_dataset/
+
+# Downloaded Colab reference PDFs
+google_collab/

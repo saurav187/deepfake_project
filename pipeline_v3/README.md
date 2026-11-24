@@ -78,6 +78,8 @@ colab download -s v3-student /content/drive/MyDrive/audio-v3/validation.json ./v
 colab stop -s v3-student
 ```
 
+**Student comparison (owner requirement):** before freezing a release, train both the compact acoustic student and a 4–6-block XLS-R student from the same teacher, evaluate them on the same validation IDs, and record accuracy, Opus penalty, short-clip coverage, size and CPU latency for each (see college/12_PIPELINE_V3_DESIGN.md, step 7 and E4). The SSL student is not implemented in `pipeline_v3/` yet; add it as a second `student` model type before running E4.
+
 The notebook equivalents are [03_teacher](../colab/03_teacher.ipynb), [04_student_export](../colab/04_student_export.ipynb) and [05_evaluate](../colab/05_evaluate.ipynb). Each starts in dry-run mode. If any CLI command fails, inspect its exit status and stop the session when done. To resume a disconnected run, mount Drive on a replacement VM, bootstrap the same source and rerun that stage. A completed selection or release is immutable. Start a fresh directory for a changed protocol. Stage only needs its listed split shards on each new VM.
 
 ## Manifests and pair verification
