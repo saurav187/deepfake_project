@@ -25,7 +25,9 @@ Restart only through the guard (no-op if running): `colab --auth=oauth2 ssh -s v
 **Measurements**
 - Inventory (MEASURED): 21:57:59 → 22:11:02 UTC (13 min), `MyDrive/audio-v3/stage0/inventory.csv` = 119,734 lines.
 - `wavlm-sv` (MEASURED): downloaded 22:11, 386 MB, `MyDrive/audio-v3/models/wavlm-sv/`.
-- Voice labelling: *pending (progress sample after ~1,024 clips)*
+- Voice labelling progress sample (MEASURED): started 22:11:09 UTC; references 10/10; **XTTSv2 1,030/28,539 committed to `stage0/sv.sqlite` at 23:14 UTC** (63 min incl. model load). Log milestones (IST): 512 by ~04:13, 768 by ~04:28, 1,024 by ~04:44. **Overall 980 clips/h**; ~1,000 clips/h while probe v2 shared the 2 vCPUs (it runs at nice 15, yet still contends), with bursts of up to ~5,000 clips/h earlier. Compute: 0.08 CU/h displayed; balance 198.38 CU at 23:14 UTC.
+  - PROJECTED finish for the remaining ~84,600 clips (XTTSv2 + ChatterboxTTS + MeloTTS): **~85 h at 1,000/h (would NOT finish in this session)** vs **~17 h at 5,000/h (≈ 16:00–17:00 IST)**. Re-measured after probe v2 ends (see below). Projected cost at 0.08 CU/h: < 2 CU for this session.
+  - Colab session limit: `v3-data` was created ~20:30 UTC on 24 Nov; Colab typically recycles a VM after ~24 h, i.e. around **20:30 UTC / 02:00 IST on 26 Nov**. Progress is committed every 256 clips to Drive, so a recycled VM loses at most ~256 clips.
 - Codec probe v1 (MEASURED; `MyDrive/audio-v3/stage0/codec_probe_hi.json`): 300 matched Hindi pairs (150 train / 150 select; 291 XTTS-v2 + 9 FreeVC24 fakes; distinct real readers 8 train / 4 select).
   - **Stored payloads verified:** all 300 genuine = **FLAC, 16 kHz, mono** (despite `.m4a` source names); all 300 fakes = **WAV PCM16, 24 kHz, mono, 384 kb/s**. No AAC/M4A payload was found in the sample, so there is no verified historical lossy-codec trace to "match".
   - Acoustic control AUCs (train-fit, select-scored; FAIL if outside 0.40–0.60):
