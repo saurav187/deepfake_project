@@ -8,6 +8,11 @@ treatments applied identically to both labels:
   baseline  the stored bytes as decoded by the pipeline
   aac       decode -> mono 16 kHz -> AAC-LC 64 kb/s (ADTS) -> pipeline decode
   opus      decode -> mono 16 kHz -> Opus 16 kb/s VoIP (Ogg), WhatsApp-like -> pipeline decode
+  crop                  the PhonemeDF fixed 4 s centre crop of the trimmed span (audio.fixed_crop)
+  crop_norm             crop, then unit-RMS level as the model input normalises it
+  crop_norm_lp7k        crop_norm + shared 7 kHz low-pass (bandwidth equalisation)
+  crop_norm_opus        crop_norm + Opus 16 kb/s VoIP
+The crop_* treatments approximate what the model receives; the first three describe storage.
 
 Pair IDs and folds are preserved; probes are fitted on train and scored on select.
 Shared re-encoding does NOT prove that earlier compression traces disappeared; this
@@ -53,9 +58,45 @@ def probe(b):
     }
 
 
+MODEL_VIEW = ("crop", "crop_norm", "crop_norm_lp7k", "crop_norm_opus")
+
+
+def _wav(x):
+    import io
+    import wave
+
+    import numpy as np
+
+    from .audio import SR
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as f:
+        f.setparams((1, 2, SR, 0, "NONE", ""))
+        f.writeframes((np.clip(x, -1, 32767 / 32768) * 32768).round().astype("<i2").tobytes())
+    return buf.getvalue()
+
+
 def treat(b, name):
     if name == "baseline":
         return b
+    if name in MODEL_VIEW:
+        import numpy as np
+
+        from .audio import decode, fixed_crop
+
+        c = fixed_crop(b)
+        if c is None:
+            raise ValueError("shorter than the 4 s crop")
+        if name == "crop":
+            return c
+        x = decode(c)
+        x = 0.05 * x / max(float(np.sqrt(np.mean(x**2))), 1e-6)  # unit level, fixed headroom
+        if name == "crop_norm_lp7k":
+            from scipy.signal import butter, sosfiltfilt
+
+            x = sosfiltfilt(butter(10, 7000, fs=16000, output="sos"), x)
+        y = _wav(x)
+        return treat(y, "opus") if name == "crop_norm_opus" else y
     return subprocess.run(
         ["ffmpeg", "-v", "error", "-i", "pipe:0", "-ac", "1", "-ar", "16000",
          *TREATMENTS[name], "pipe:1"],
@@ -119,7 +160,7 @@ def run(data, per_split, base):
             "Provenance fields (source/pair) are excluded from these acoustic panels.",
         ],
     }
-    for name in ("baseline", *TREATMENTS):
+    for name in ("baseline", *TREATMENTS, *MODEL_VIEW):
         feats, kept = [], []
         for r in rows:
             try:

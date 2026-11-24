@@ -30,8 +30,11 @@ def test_treatments_reencode():
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(22050)
-        w.writeframes((np.sin(np.arange(22050 * 2) / 7) * 9000).astype("<i2").tobytes())
+        w.writeframes((np.sin(np.arange(22050 * 6) / 7) * 9000).astype("<i2").tobytes())
     b = buf.getvalue()
     assert probe(b)["codec"] == "pcm_s16le"
     assert probe(treat(b, "aac"))["codec"] == "aac"
     assert probe(treat(b, "opus"))["codec"] == "opus"
+    for name in ("crop", "crop_norm", "crop_norm_lp7k"):
+        assert probe(treat(b, name))["codec"] == "pcm_s16le"
+    assert probe(treat(b, "crop_norm_opus"))["codec"] == "opus"
