@@ -28,3 +28,6 @@ Thumbs.db
 GIT_SETUP.local.txt
 BUNDLE_SHA256SUMS
 /deepfake_bundle_v1.tar
+
+# Downloaded research papers (copyrighted PDFs)
+papers/
