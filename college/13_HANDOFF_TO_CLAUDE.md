@@ -1,5 +1,36 @@
 # Pipeline v3 handoff for Claude
 
+<!-- OVERNIGHT-STAGE1:START -->
+## Overnight Stage 1 run — 25 Nov 2026 (Claude, unattended; owner approved Option A)
+
+*Live section, updated during the night. MEASURED = observed on the owner's Colab/Drive; PROJECTED = estimate.*
+
+**State at last update (22:10 UTC / 03:40 IST):** Stage 1 chain running on the existing CPU-only `v3-data` session (2 vCPU, 12 GB RAM, 0.08 CU/h, Drive mounted at `/content/drive`). Inventory in progress; voice labelling not started yet. Hindi codec probe running at low priority.
+
+**Code:** branch `pipeline-v3-scratch`; remote bundle = `bdfac3a` + Option A files (`audit.py`, `cli.py`, `stage0.py`, `codec_probe.py` from local commit `3cf1eca` and the uncommitted codec probe). Nothing pushed.
+
+**What was done**
+1. Refreshed `/content/v3-src` from `bdfac3a` (copy also at `MyDrive/audio-v3/v3-code.tar`); Colab already satisfies `requirements-colab.txt` (transformers 5.22.1, huggingface-hub 1.33.0, pyarrow 23.0.1).
+2. Started ONE stage 1 chain (`/content/stage1_chain.sh`, PID-file guard `/content/start_stage1.sh`): inventory → `wavlm-sv` download if missing → `voice_labels --batch 8` on CPU. Log: `/content/stage1.log`, copied to `MyDrive/audio-v3/stage0/stage1.log`.
+3. Option A implemented locally and committed (`3cf1eca`): policy `acoustic-gate-v2-provenance-warning`. Provenance fields (source, pair, archive, path) are reported with their AUC as `provenance_warning` and excluded from blocking and from the joint predictor; every decoded-signal control **and** stored codec/sample rate still block at 0.60 in both directions; matched-parent, reader, voice, text and generator checks unchanged; pilot/teacher/student, catalog and pack reject any other policy (old `source-strict-v1` audits cannot authorize training). 59 tests pass. Known Hindi result recorded: selection has **811 genuine Kathbath** and **1,596 IndicSynth** fakes; **source-only AUC 1.00** (now a warning, not a block).
+4. Hindi codec probe (`pipeline_v3/codec_probe.py`): 150 matched pairs per fold (train/select), baseline vs AAC 64 kb/s vs Opus 16 kb/s VoIP, applied identically to both labels. Output: `MyDrive/audio-v3/stage0/codec_probe_hi.json`. *(results below when finished)*
+5. **Hindi FreeVC limitation:** the held-family FreeVC24 selection panel has **210 fake clips from one source reader** (10 target IDs). Any Hindi unseen-family number from it describes one reader.
+
+**How to inspect without starting a duplicate**
+```bash
+colab --auth=oauth2 ssh -s v3-data -- 'cat /content/stage1.log; cat /content/stage1.pid; ps -eo pid,etime,args | grep -E "[p]ipeline_v3"'
+```
+Restart only through the guard (no-op if running): `colab --auth=oauth2 ssh -s v3-data -- 'bash /content/start_stage1.sh'`. Voice labelling resumes from `MyDrive/audio-v3/stage0/sv.sqlite`.
+
+**Measurements**
+- Inventory: *pending*
+- Voice labelling: *pending (progress sample after ~1,024 clips)*
+- Codec probe: *pending*
+
+**Next steps / decisions for the owner:** *pending*
+<!-- OVERNIGHT-STAGE1:END -->
+
+
 **24 November 2026 · Local branch `pipeline-v3-scratch` · Base `detector-v2` at `f1f7e59`**
 
 ## Stage 0 handoff · 25 November 2026
