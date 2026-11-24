@@ -13,6 +13,18 @@ from .audio import SR, decode
 from .data import entries, payload
 from .metrics import metrics
 
+# Audit policy (owner decision, 25 Nov 2026, "Option A"). Literal provenance fields
+# (which corpus, which matched source pair, archive or path) are reported as a
+# prominent provenance warning but no longer block training: in matched public
+# corpora such as Kathbath/IndicSynth, real and fake necessarily come from different
+# releases, so source-only AUC is 1.00 by construction and is not something the
+# model can observe. Every measurement of the decoded signal, plus the stored codec
+# and sample rate, still blocks at the 0.60 cutoff in both directions, alone and in
+# a joint predictor that excludes provenance fields. Older reports
+# ("source-strict-v1") cannot authorize pilot or training under this version.
+POLICY = "acoustic-gate-v2-provenance-warning"
+PROVENANCE_FIELDS = frozenset({"source", "pair", "archive", "path"})
+
 
 def descriptors(b):
     cmd = [
@@ -95,6 +107,11 @@ def panels(rows, features):
             raise ValueError(f"Incomplete audit panel: {pair}")
         result["source_pairs"][pair] = fit_controls(subset, [features[i] for i in idx])
     result["pass"] &= all(v["pass"] for v in result["source_pairs"].values())
+    result["policy"] = POLICY
+    result["provenance_warning"] = result.get("provenance_warning") or any(
+        v["provenance_warning"]
+        for v in [*result["languages"].values(), *result["source_pairs"].values()]
+    )
     return result
 
 
@@ -103,9 +120,13 @@ def fit_controls(rows, features):
     y = np.array([int(r["label"]) for r in rows])
     reports = {}
     for field in [*features[0], "joint"]:
-        # Stage 0 gates packaging provenance as well as acoustic measurements.
+        # The joint predictor combines every blocking field and excludes provenance.
         inputs = [
-            {k: v for k, v in f.items() if k == field or field == "joint"}
+            {
+                k: v
+                for k, v in f.items()
+                if k == field or (field == "joint" and k not in PROVENANCE_FIELDS)
+            }
             for f in features
         ]
         model = make_pipeline(
@@ -139,11 +160,30 @@ def assess(rows, reports):
             for p in r["parent"].split("|")
         )
     ]
-    source_confound = informative(reports["source"]["auc"])
+    provenance = {k: v for k, v in reports.items() if k in PROVENANCE_FIELDS}
+    blocking = {k: v for k, v in reports.items() if k not in PROVENANCE_FIELDS}
+    failed = sorted(k for k, v in blocking.items() if informative(v["auc"]))
     return {
+        "policy": POLICY,
         "controls": reports,
+        "blocking_fields": sorted(blocking),
+        "failed_fields": failed,
         "unmatched_fake_parents": len(unmatched),
-        "provenance_warning": source_confound,
-        "pass": all(not informative(r["auc"]) for r in reports.values())
-        and not unmatched,
+        # Reported prominently, never silently: literal provenance predicts the label.
+        "provenance_warning": any(informative(v["auc"]) for v in provenance.values()),
+        "provenance_auc": {k: v["auc"] for k, v in provenance.items()},
+        "pass": not failed and not unmatched,
     }
+
+
+def require_passing(report, index_sha256):
+    """Gate for pilot/teacher/student: a passing audit under this policy, for this pack."""
+    if (
+        report.get("policy") != POLICY
+        or not report.get("pass")
+        or report.get("index_sha256") != index_sha256
+    ):
+        raise ValueError(
+            f"A passing {POLICY} audit for this pack is required "
+            f"(found policy {report.get('policy')!r}, pass={report.get('pass')})"
+        )

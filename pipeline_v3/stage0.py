@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .adapters import selected_members
 from .audio import fixed_crop
-from .audit import descriptors, panels
+from .audit import POLICY, descriptors, panels
 from .data import FIELDS, check, digest, pack, safe_path
 from .phonemedf import SYSTEMS, counts, inventory, match, proof, write_csv
 
@@ -83,7 +83,8 @@ def audit_selection(root, work):
 def catalog(root, work):
     report = json.loads((work / "prep-audit.json").read_text())
     if (
-        not report["pass"]
+        report.get("policy") != POLICY
+        or not report["pass"]
         or digest(work / "eligible.csv") != report["eligible_sha256"]
         or digest(work / "selection.csv") != report["selection_sha256"]
     ):
@@ -187,7 +188,8 @@ def main():
         rows = read(work / "catalog.csv")
         eligible = read(work / "eligible.csv")
         if (
-            not report["pass"]
+            report.get("policy") != POLICY
+            or not report["pass"]
             or digest(work / "eligible.csv") != report["eligible_sha256"]
             or digest(work / "selection.csv") != report["selection_sha256"]
             or [[r[k] for k in [*FIELDS, "sha256"] if k != "path"] for r in rows]
@@ -199,7 +201,7 @@ def main():
         write_csv(catalog_path, rows)
         pack(a.data, catalog_path.name, work / "packed")
         report["index_sha256"] = digest(work / "packed" / "index.json")
-        report["policy"] = "source-strict-v1"
+        report["policy"] = POLICY
         tmp = work / "audit.tmp"
         tmp.write_text(json.dumps(report, indent=2))
         tmp.replace(work / "audit.json")

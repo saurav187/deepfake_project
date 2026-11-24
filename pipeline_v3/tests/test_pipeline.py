@@ -133,11 +133,14 @@ def test_shortcut_controls():
 
     rows = [record(i) for i in (0, 1)]
     controls = {"source": {"auc": 1.0}, "edge": {"auc": 0.5}}
-    assert not assess(rows, controls)["pass"]
+    assert not assess(rows, controls)["pass"]  # unmatched fake parent still blocks
     rows[1]["parent"] = rows[0]["parent"]
-    assert not assess(rows, controls)["pass"]
+    # Option A: literal provenance alone warns but does not block.
+    result = assess(rows, controls)
+    assert result["pass"] and result["provenance_warning"]
     controls["source"]["auc"] = 0.5
     assert assess(rows, controls)["pass"]
+    assert not assess(rows, controls)["provenance_warning"]
     for value in (0.20, 0.85, None):
         assert not assess(rows, dict(controls, rate={"auc": value}))["pass"]
 

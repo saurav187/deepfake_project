@@ -101,33 +101,24 @@ def main():
         from .audit import audit
 
         result = audit(cfg.local)
-        result["policy"] = "source-strict-v1"
         result["index_sha256"] = digest(cfg.local / "index.json")
         (cfg.data / "audit.json").write_text(json.dumps(result, indent=2))
         print(json.dumps(result))
         if not result["pass"]:
             raise SystemExit("Nuisance controls failed")
     elif cfg.action == "pilot":
+        from .audit import require_passing
         from .pilot import pilot
 
         audit_report = json.loads((cfg.data / "audit.json").read_text())
-        if (
-            audit_report.get("policy") != "source-strict-v1"
-            or not audit_report["pass"]
-            or audit_report["index_sha256"] != digest(cfg.local / "index.json")
-        ):
-            raise ValueError("A passing audit for this pack is required")
+        require_passing(audit_report, digest(cfg.local / "index.json"))
         pilot(cfg)
     elif cfg.action in {"teacher", "student"}:
+        from .audit import require_passing
         from .train import train
 
         audit = json.loads((cfg.data / "audit.json").read_text())
-        if (
-            audit.get("policy") != "source-strict-v1"
-            or not audit["pass"]
-            or audit["index_sha256"] != digest(cfg.local / "index.json")
-        ):
-            raise ValueError("A passing audit for this pack is required")
+        require_passing(audit, digest(cfg.local / "index.json"))
         report = json.loads((cfg.data / "pilot.json").read_text())
         if not report.get("go") or report.get("index_sha256") != audit["index_sha256"]:
             raise ValueError("Pilot criteria have not passed for this pack")
