@@ -5,7 +5,7 @@
 
 *Live section, updated during the night. MEASURED = observed on the owner's Colab/Drive; PROJECTED = estimate.*
 
-**State at last update (22:10 UTC / 03:40 IST):** Stage 1 chain running on the existing CPU-only `v3-data` session (2 vCPU, 12 GB RAM, 0.08 CU/h, Drive mounted at `/content/drive`). Inventory in progress; voice labelling not started yet. Hindi codec probe running at low priority.
+**State at last update (22:50 UTC / 04:20 IST):** Stage 1 chain running on the existing CPU-only `v3-data` session (2 vCPU, 12 GB RAM, 0.08 CU/h, Drive mounted at `/content/drive`). Inventory DONE; `wavlm-sv` present; **voice labelling RUNNING** (XTTSv2 ≥512/28,539 at 22:45 UTC). Codec probe v1 DONE; extended probe v2 (model-view treatments) running at nice 15.
 
 **Code:** branch `pipeline-v3-scratch`; remote bundle = `bdfac3a` + Option A files (`audit.py`, `cli.py`, `stage0.py`, `codec_probe.py` from local commit `3cf1eca` and the uncommitted codec probe). Nothing pushed.
 
@@ -23,9 +23,21 @@ colab --auth=oauth2 ssh -s v3-data -- 'cat /content/stage1.log; cat /content/sta
 Restart only through the guard (no-op if running): `colab --auth=oauth2 ssh -s v3-data -- 'bash /content/start_stage1.sh'`. Voice labelling resumes from `MyDrive/audio-v3/stage0/sv.sqlite`.
 
 **Measurements**
-- Inventory: *pending*
+- Inventory (MEASURED): 21:57:59 → 22:11:02 UTC (13 min), `MyDrive/audio-v3/stage0/inventory.csv` = 119,734 lines.
+- `wavlm-sv` (MEASURED): downloaded 22:11, 386 MB, `MyDrive/audio-v3/models/wavlm-sv/`.
 - Voice labelling: *pending (progress sample after ~1,024 clips)*
-- Codec probe: *pending*
+- Codec probe v1 (MEASURED; `MyDrive/audio-v3/stage0/codec_probe_hi.json`): 300 matched Hindi pairs (150 train / 150 select; 291 XTTS-v2 + 9 FreeVC24 fakes; distinct real readers 8 train / 4 select).
+  - **Stored payloads verified:** all 300 genuine = **FLAC, 16 kHz, mono** (despite `.m4a` source names); all 300 fakes = **WAV PCM16, 24 kHz, mono, 384 kb/s**. No AAC/M4A payload was found in the sample, so there is no verified historical lossy-codec trace to "match".
+  - Acoustic control AUCs (train-fit, select-scored; FAIL if outside 0.40–0.60):
+
+    | Treatment (both labels) | codec | rate | duration | rms | edge | upper_band | speech_ratio | rolloff | tilt | joint | gate |
+    |---|---|---|---|---|---|---|---|---|---|---|---|
+    | baseline (stored) | 1.00 | 1.00 | 0.49 | 0.85 | 0.89 | 0.71 | 0.60 | 0.61 | 0.62 | 1.00 | FAIL |
+    | AAC 64 kb/s | 0.50 | 0.50 | 0.50 | 0.84 | 0.87 | 0.71 | 0.61 | 0.61 | 0.62 | 0.94 | FAIL |
+    | Opus 16 kb/s VoIP | 0.50 | 0.50 | 0.49 | 0.85 | 0.90 | 0.71 | 0.54 | 0.59 | 0.61 | 0.94 | FAIL |
+
+  - Reading: shared re-encoding removes the container cue but **not** the dominant cues — level (rms), edge silence and upper-band energy. Note the Hindi rows are audited on stored bytes (only PhonemeDF goes through `fixed_crop`), whereas the model input trims and level-normalises; probe v2 measures crop / level-normalised / 7 kHz low-pass / Opus views to separate storage cues from what the model can see.
+- Codec probe v2: *pending*
 
 **Next steps / decisions for the owner:** *pending*
 <!-- OVERNIGHT-STAGE1:END -->
