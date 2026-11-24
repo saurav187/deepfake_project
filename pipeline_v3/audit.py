@@ -47,6 +47,19 @@ def descriptors(b):
         if not len(active)
         else (active[0] + len(x) - 1 - active[-1]) / len(x),
         "upper_band": fft[freq >= 4000].sum() / energy,
+        "speech_ratio": float(
+            np.mean(
+                np.sqrt(
+                    np.mean(
+                        np.pad(x, (0, (-len(x)) % 160)).reshape(-1, 160) ** 2, axis=1
+                    )
+                )
+                > max(0.001, 0.03 * np.max(abs(x)))
+            )
+        ),
+        "rolloff_hz": float(
+            freq[min(len(freq) - 1, np.searchsorted(np.cumsum(fft), 0.95 * fft.sum()))]
+        ),
         "tilt": fft[freq <= 1000].sum() / energy,
     }
 
@@ -57,6 +70,10 @@ def audit(local):
         dict(descriptors(payload(local, r)), pair=r["pair"], source=r["source"])
         for r in rows
     ]
+    return panels(rows, features)
+
+
+def panels(rows, features):
     result = fit_controls(rows, features)
     result["languages"] = {}
     for lang in ("en", "hi"):
@@ -68,6 +85,16 @@ def audit(local):
             raise ValueError(f"Missing real/fake audit cell for {lang}")
         result["languages"][lang] = fit_controls(panel, [features[i] for i in idx])
     result["pass"] &= all(item["pass"] for item in result["languages"].values())
+    result["source_pairs"] = {}
+    for pair in sorted({r["pair"] for r in rows}):
+        idx = [i for i, r in enumerate(rows) if r["pair"] == pair]
+        subset = [rows[i] for i in idx]
+        if {(r["split"], r["label"]) for r in subset} != {
+            (s, y) for s in ("train", "select") for y in ("0", "1")
+        }:
+            raise ValueError(f"Incomplete audit panel: {pair}")
+        result["source_pairs"][pair] = fit_controls(subset, [features[i] for i in idx])
+    result["pass"] &= all(v["pass"] for v in result["source_pairs"].values())
     return result
 
 
@@ -76,14 +103,9 @@ def fit_controls(rows, features):
     y = np.array([int(r["label"]) for r in rows])
     reports = {}
     for field in [*features[0], "joint"]:
-        # Literal packaging/source identity can distinguish separately distributed originals.
-        # Report that structural confound separately from signal that survives decoding.
+        # Stage 0 gates packaging provenance as well as acoustic measurements.
         inputs = [
-            {
-                k: v
-                for k, v in f.items()
-                if k == field or (field == "joint" and k != "source")
-            }
+            {k: v for k, v in f.items() if k == field or field == "joint"}
             for f in features
         ]
         model = make_pipeline(
@@ -98,8 +120,7 @@ def fit_controls(rows, features):
 
 
 def assess(rows, reports):
-    # Originals and fakes can be shipped in separate archives even for the same
-    # utterance. A source-only predictor then requires verified matched originals.
+    # Both orientations are shortcuts. Missing measurements fail closed.
     def informative(auc):
         return auc is None or max(auc, 1 - auc) > 0.60
 
@@ -123,8 +144,6 @@ def assess(rows, reports):
         "controls": reports,
         "unmatched_fake_parents": len(unmatched),
         "provenance_warning": source_confound,
-        "pass": all(
-            not informative(r["auc"]) for k, r in reports.items() if k != "source"
-        )
-        and not (source_confound and unmatched),
+        "pass": all(not informative(r["auc"]) for r in reports.values())
+        and not unmatched,
     }

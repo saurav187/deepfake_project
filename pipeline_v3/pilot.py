@@ -13,7 +13,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from transformers import AutoModel
 
-from .audio import cepstra, channel, decode, prepare, windows
+from .audio import cepstra, channel, decode, model_view, windows
 from .data import digest, entries, payload
 from .metrics import bootstrap, metrics, slices
 
@@ -32,7 +32,7 @@ def cache(cfg, rows, encoder, tag):
             )
             + digest(encoder / "config.json")
             + digest(cfg.local / "index.json")
-            + "v3-pool-2"
+            + "v3-pool-3"
         ).encode()
     ).hexdigest()[:16]
     directory = cfg.data / "features" / tag / signature
@@ -44,7 +44,7 @@ def cache(cfg, rows, encoder, tag):
                 key = r["id"], view
                 path = directory / f"{r['id']}-{view}.npz"
                 if not path.exists():
-                    x, _ = prepare(channel(decode(payload(cfg.local, r)), view))
+                    x = model_view(channel(decode(payload(cfg.local, r)), view), r)
                     pooled = []
                     lfcc = []
                     for _, w in windows(x):
@@ -86,7 +86,7 @@ def pilot(cfg):
     allrows = entries(cfg.local, {"train", "select"})
     # Replay the family holdout on a final pack that also contains training Gemini.
     # This restriction applies to feature probes only. The teacher uses the full pack.
-    holdout = {"gemini", "freevc24"}
+    holdout = {"gemini", "freevc24", "chatterboxtts"}
     allrows = [
         dict(r, domain="unseen") if r["generator"] in holdout else r
         for r in allrows

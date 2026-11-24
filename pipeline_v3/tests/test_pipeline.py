@@ -135,6 +135,8 @@ def test_shortcut_controls():
     controls = {"source": {"auc": 1.0}, "edge": {"auc": 0.5}}
     assert not assess(rows, controls)["pass"]
     rows[1]["parent"] = rows[0]["parent"]
+    assert not assess(rows, controls)["pass"]
+    controls["source"]["auc"] = 0.5
     assert assess(rows, controls)["pass"]
     for value in (0.20, 0.85, None):
         assert not assess(rows, dict(controls, rate={"auc": value}))["pass"]

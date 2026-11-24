@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from .audio import channel, decode, prepare, windows
+from .audio import channel, decode, model_view, windows
 from .data import digest, entries, payload
 from .metrics import slices
 from .models import Student, Teacher, tensor
@@ -21,7 +21,7 @@ def score(model, student, rows, local, device):
     model.eval()
     with torch.inference_mode():
         for r in rows:
-            x, _ = prepare(decode(payload(local, r)))
+            x = model_view(decode(payload(local, r)), r)
             if list(windows(x)):
                 s = logits(model, x, student, device).cpu().numpy()
                 out.append((dict(r, length="<4s" if len(x) < 64000 else "4s+"), s))
@@ -97,7 +97,7 @@ def train(cfg, student):
                     "rawboost",
                 ]
             )
-            x, _ = prepare(channel(raw, name_aug, rng))
+            x = model_view(channel(raw, name_aug, rng), r)
             chunks = list(windows(x))
             if not chunks:
                 continue

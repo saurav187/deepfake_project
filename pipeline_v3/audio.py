@@ -128,3 +128,34 @@ def features(x):
 def cepstra(x):
     c = dct(features(x), norm="ortho", axis=1)[:, :24]
     return np.concatenate([c.mean(0), c.std(0)])
+
+
+def fixed_crop(data):
+    """Trim both labels identically and return four seconds of unpadded source PCM."""
+    import io
+    import wave
+
+    x = decode(data)
+    trimmed, start = prepare(x)
+    if len(trimmed) < WINDOW:
+        return None
+    offset = start + (len(trimmed) - WINDOW) // 2
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as f:
+        f.setparams((1, 2, SR, 0, "NONE", ""))
+        f.writeframes(
+            (np.clip(x[offset : offset + WINDOW], -1, 32767 / 32768) * 32768)
+            .round()
+            .astype("<i2")
+            .tobytes()
+        )
+    return buf.getvalue()
+
+
+def model_view(x, row):
+    if row["pair"] == "phonemedf":
+        if len(x) < WINDOW:
+            return x[:0]
+        y = x[:WINDOW]
+        return y / max(float(y.std()), 1e-5)
+    return prepare(x)[0]

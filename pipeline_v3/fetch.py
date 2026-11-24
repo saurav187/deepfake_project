@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .phonemedf import PINS
+
 MINIMUM = {
     "mailabs": 8.017,
     "mlaad": 1.359,
@@ -15,6 +17,7 @@ MINIMUM = {
     "indicvoices": 2.935,
 }
 EXTRAS = {
+    "phonemedf": sum(n for n, _ in PINS.values()) / 1e9,
     "libri-dev": 0.652,
     "shrutilipi": 0.990,
     "voxenes": 19.847,
@@ -22,6 +25,7 @@ EXTRAS = {
     "llamapartial": 28.220,
 }
 ENCODERS = {
+    "wavlm-sv": "microsoft/wavlm-base-plus-sv",
     "xlsr": "facebook/wav2vec2-xls-r-300m",
     "wavlm-base": "microsoft/wavlm-base-plus",
 }
@@ -63,6 +67,44 @@ def fetch_libri(data):
             tmp.replace(path)
 
 
+def fetch_phonemedf(data):
+    import hashlib
+
+    dest = data / "development" / "phonemedf"
+    dest.mkdir(parents=True, exist_ok=True)
+    for name, (size, md5) in PINS.items():
+        path = dest / name
+        partial = dest / (name + ".part")
+        if not path.exists() and (
+            not partial.exists() or partial.stat().st_size != size
+        ):
+            subprocess.run(
+                [
+                    "curl",
+                    "-fL",
+                    "--retry",
+                    "3",
+                    "-C",
+                    "-",
+                    "-o",
+                    str(partial),
+                    f"https://zenodo.org/api/records/19362791/files/{name}/content",
+                ],
+                check=True,
+            )
+        candidate = path if path.exists() else partial
+        with candidate.open("rb") as f:
+            if (
+                candidate.stat().st_size != size
+                or hashlib.file_digest(f, "md5").hexdigest() != md5
+            ):
+                raise ValueError(
+                    f"Checksum failed: move {candidate} aside before retrying"
+                )
+        if candidate == partial:
+            partial.replace(path)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--data", required=True, type=Path)
@@ -82,6 +124,7 @@ def main():
         json.dumps(
             {
                 "files": selected,
+                "phonemedf_files": PINS if "phonemedf" in selected else {},
                 "libri_archives": [s + ".tar.gz" for s in LIBRI]
                 if "libri-dev" in selected
                 else [],
@@ -99,7 +142,9 @@ def main():
     args.data.mkdir(parents=True, exist_ok=True)
     if "libri-dev" in selected:
         fetch_libri(args.data)
-    audio = [s for s in selected if s in sizes and s != "libri-dev"]
+    if "phonemedf" in selected:
+        fetch_phonemedf(args.data)
+    audio = [s for s in selected if s in sizes and s not in {"libri-dev", "phonemedf"}]
     if audio:
         script = Path(__file__).resolve().parents[1] / "college" / "DOWNLOAD_PLAN.sh"
         subprocess.run(

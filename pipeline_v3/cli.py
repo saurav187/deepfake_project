@@ -101,6 +101,7 @@ def main():
         from .audit import audit
 
         result = audit(cfg.local)
+        result["policy"] = "source-strict-v1"
         result["index_sha256"] = digest(cfg.local / "index.json")
         (cfg.data / "audit.json").write_text(json.dumps(result, indent=2))
         print(json.dumps(result))
@@ -109,13 +110,22 @@ def main():
     elif cfg.action == "pilot":
         from .pilot import pilot
 
+        audit_report = json.loads((cfg.data / "audit.json").read_text())
+        if (
+            audit_report.get("policy") != "source-strict-v1"
+            or not audit_report["pass"]
+            or audit_report["index_sha256"] != digest(cfg.local / "index.json")
+        ):
+            raise ValueError("A passing audit for this pack is required")
         pilot(cfg)
     elif cfg.action in {"teacher", "student"}:
         from .train import train
 
         audit = json.loads((cfg.data / "audit.json").read_text())
-        if not audit["pass"] or audit["index_sha256"] != digest(
-            cfg.local / "index.json"
+        if (
+            audit.get("policy") != "source-strict-v1"
+            or not audit["pass"]
+            or audit["index_sha256"] != digest(cfg.local / "index.json")
         ):
             raise ValueError("A passing audit for this pack is required")
         report = json.loads((cfg.data / "pilot.json").read_text())

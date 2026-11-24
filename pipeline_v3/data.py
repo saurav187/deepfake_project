@@ -123,6 +123,11 @@ def pack(data, catalog, out, limit=750_000_000):
         try:
             for i, r in enumerate(rows):
                 payload = safe_path(data / "development", r["path"]).read_bytes()
+                if (
+                    r.get("sha256")
+                    and hashlib.sha256(payload).hexdigest() != r["sha256"]
+                ):
+                    raise ValueError("Catalog payload differs from audited content")
                 group = (r["split"], r["source"])
                 if (
                     group != previous_group

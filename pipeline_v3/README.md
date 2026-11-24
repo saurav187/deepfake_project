@@ -1,6 +1,6 @@
 # Train and evaluate the bilingual detector on Colab
 
-**Current English pilot.** The first Drive run produced no English selection or validation pairs. On that Drive, use the [English repair and exact Colab commands](../college/15_ENGLISH_DATA_FIX.md#owner-run-sequence) or [setup notebook](../colab/01_setup_and_data.ipynb) before the pilot. The original publisher selection is the Hindi input to the repaired pack. The existing generic prepare/pack sequence below describes the original corpus only.
+**Current Stage 1 workflow.** The owner has PhonemeDF and both LibriSpeech development archives. Use the [Stage 0 report](../college/17_STAGE0_REPORT.md) and the setup notebook. The observed Hindi archive-identity AUC is 1.00 under the new strict gate. The older English commercial-generation recipe below is an optional Stage 3 panel.
 
 
 The source in this branch is sufficient to build a student release after the pilot passes. The trained v1 release is available through `DETECTOR_BACKEND=detector`. A v3 release uses `DETECTOR_BACKEND=v3`. Large inputs and run products belong outside the checkout. Use Linux, Python ≥3.11, preinstalled PyTorch and FFmpeg. The model and APIs need no network during training once weights and shards are present.

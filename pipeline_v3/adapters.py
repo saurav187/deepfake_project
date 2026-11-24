@@ -64,38 +64,9 @@ def catalog(data, selection, out):
             with target.open("xb") as f:
                 f.write(b)
 
-    for archive, items in groups.items():
-        if all(r["member"] == "-" for r in items):
-            if not archive.is_file():
-                raise FileNotFoundError(archive)
-            for r in items:
-                if r["pair"] == "libri-stock":
-                    write(r, archive.read_bytes())
-            continue
-        wanted = {r["member"]: r for r in items}
-        if len(wanted) != len(items):
-            raise ValueError("Duplicate source member")
-        if archive.suffix == ".parquet":
-            import pyarrow.parquet as pq
-
-            offset = 0
-            pf = pq.ParquetFile(archive)
-            for batch in pf.iter_batches(
-                batch_size=32, columns=[audio_column(pf.schema_arrow.names)]
-            ):
-                for i, audio in enumerate(batch.column(0).to_pylist(), offset):
-                    if r := wanted.pop(str(i), None):
-                        write(r, audio["bytes"])
-                offset += len(batch)
-                if not wanted:
-                    break
-        else:
-            with tarfile.open(archive, "r|*") as tar:
-                for member in tar:
-                    if member.isfile() and (r := wanted.pop(member.name, None)):
-                        write(r, tar.extractfile(member).read())
-        if wanted:
-            raise ValueError(f"Unresolved {len(wanted)} members in {archive.name}")
+    for r, content in selected_members(groups):
+        if r["member"] != "-" or r["pair"] == "libri-stock":
+            write(r, content)
     path = safe_path(root, out)
     tmp = path.with_suffix(".tmp")
     with tmp.open("w", newline="") as f:
@@ -152,3 +123,37 @@ def inventory(data, out):
                     if m.isfile() and m.name.lower().endswith(".wav"):
                         emit("mailabs", p, m.name, {"original_file": m.name})
     tmp.replace(dest)
+
+
+def selected_members(groups):
+    for archive, items in groups.items():
+        if all(r["member"] == "-" for r in items):
+            if not archive.is_file():
+                raise FileNotFoundError(archive)
+            for r in items:
+                yield r, archive.read_bytes()
+            continue
+        wanted = {r["member"]: r for r in items}
+        if len(wanted) != len(items):
+            raise ValueError("Duplicate source member")
+        if archive.suffix == ".parquet":
+            import pyarrow.parquet as pq
+
+            offset = 0
+            pf = pq.ParquetFile(archive)
+            for batch in pf.iter_batches(
+                batch_size=32, columns=[audio_column(pf.schema_arrow.names)]
+            ):
+                for i, audio in enumerate(batch.column(0).to_pylist(), offset):
+                    if r := wanted.pop(str(i), None):
+                        yield r, audio["bytes"]
+                offset += len(batch)
+                if not wanted:
+                    break
+        else:
+            with tarfile.open(archive, "r|*") as tar:
+                for member in tar:
+                    if member.isfile() and (r := wanted.pop(member.name, None)):
+                        yield r, tar.extractfile(member).read()
+        if wanted:
+            raise ValueError(f"Unresolved {len(wanted)} members in {archive.name}")
