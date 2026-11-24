@@ -10,6 +10,15 @@ from pathlib import Path
 from .data import FIELDS, check, safe_path
 
 
+def audio_column(names):
+    """IndicSynth stores audio in 'audio'; Kathbath and IndicVoices in 'audio_filepath'
+    (both struct<bytes, path>)."""
+    for name in ("audio", "audio_filepath"):
+        if name in names:
+            return name
+    raise KeyError(f"no audio column among {list(names)}")
+
+
 def catalog(data, selection, out):
     """The selection adds a reviewed source member to the common lineage columns.
 
@@ -55,8 +64,9 @@ def catalog(data, selection, out):
             import pyarrow.parquet as pq
 
             offset = 0
-            for batch in pq.ParquetFile(archive).iter_batches(
-                batch_size=32, columns=["audio"]
+            pf = pq.ParquetFile(archive)
+            for batch in pf.iter_batches(
+                batch_size=32, columns=[audio_column(pf.schema_arrow.names)]
             ):
                 for i, audio in enumerate(batch.column(0).to_pylist(), offset):
                     if r := wanted.pop(str(i), None):
@@ -107,9 +117,10 @@ def inventory(data, out):
 
                 offset = 0
                 pf = pq.ParquetFile(p)
+                col = audio_column(pf.schema_arrow.names)
                 for batch in pf.iter_batches(batch_size=32):
                     for i, row in enumerate(batch.to_pylist(), offset):
-                        audio = row.pop("audio")
+                        audio = row.pop(col)
                         row["audio_path"] = audio["path"]
                         emit(src, p, str(i), row)
                     offset += len(batch)

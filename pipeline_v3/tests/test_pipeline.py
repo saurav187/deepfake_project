@@ -177,6 +177,18 @@ def test_match_join(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("names", "expected"),
+    [(["audio"], "audio"), (["text", "audio_filepath"], "audio_filepath")],
+)
+def test_hindi_audio_column_variants(names, expected):
+    from pipeline_v3.adapters import audio_column
+
+    assert audio_column(names) == expected
+    with pytest.raises(KeyError, match="no audio column"):
+        audio_column(["text"])
+
+
 def test_video_container_in_memory(tmp_path):
     import subprocess
 
