@@ -1,5 +1,44 @@
 # Pipeline v3 handoff for Claude
 
+## English XTTS-only run — audit FAILED (25 Nov 2026, Claude; owner option B)
+
+**Last completed stage: match.** The acoustic audit failed at 08:40 UTC (14:10 IST). Catalog, pack, pilot and Teacher V1 did not run. **No GPU was provisioned**, so no A100 or H100 was used and there is no throughput or teacher checkpoint. No threshold or gate was changed.
+
+- **Code:** `ad13ba8` adds `--xtts-only`. It writes to a separate work dir, `stage0-en-ecapa-xtts`, drops MeloTTS, and keeps Chatterbox fully held out. The default two-generator recipe is unchanged. Codex review `b675661` landed after the audit had already started, so it has not been run on Colab yet.
+- **Session:** CPU session `v3-cpu`, with Drive mounted 07:2x UTC. Everything read straight from Drive FUSE at about 5–10 MB/s. Match took 11 s; the audit took 70 min, from 07:29:52 to 08:40:28.
+- **Match passed:**
+
+  | Fold | Real clips / readers | XTTS-v2 clips / readers / voices | Chatterbox clips / readers / voices |
+  |---|---|---|---|
+  | train | 2,282 / 126 | 2,282 / 126 / 4 | held out |
+  | select | 1,338 / 44 | 657 / 44 / 2 | 843 / 44 / 2 |
+  | calibrate | 615 / 33 | 333 / 33 / 1 | 333 / 33 / 1 |
+  | threshold | 359 / 19 | 196 / 19 / 1 | 203 / 19 / 1 |
+  | validate | 559 / 29 | 300 / 29 / 1 | 313 / 29 / 1 |
+
+- **Audit:** policy `acoustic-gate-v2-provenance-warning`. It probed the stored 4 s fixed crop, the exact training bytes, applied identically to real and fake audio. n = 2,768, probes fitted on train and scored on select, gate AUC ≤ 0.60.
+  - 259 rows were dropped by the parent join; there were 0 unmatched fake parents.
+  - **FAILED fields:**
+    - rms **0.886**
+    - upper_band **0.817**
+    - rolloff_hz **0.779**
+    - tilt **0.758**
+    - speech_ratio **0.659**
+    - joint **0.887**
+  - **Passed:** edge 0.578, duration, codec, rate, source and pair, all at 0.50.
+  - **Exact reason:** `ValueError: Nuisance gate failed; see …/stage0-en-ecapa-xtts/prep-audit.json`.
+- **Reading the result:**
+  - Duration is controlled by the crop.
+  - The fakes still differ from real LibriSpeech in level (rms) and in spectral bandwidth and shape: upper_band, rolloff and tilt.
+  - Level normalisation at the model input would remove the rms cue. It would not remove the spectral cues, which come from the XTTS output band against LibriSpeech's MP3-origin band.
+  - This is a property of the PhonemeDF real/XTTS pairing, not of MeloTTS or the voice rule. The two-generator recipe would face the same check.
+- **Artifacts:** everything is under `MyDrive/audio-v3/stage0-en-ecapa-xtts/`: `selection.csv` (sha256 `5aa26f7b…`), `eligible.csv` (`ae1f4f66…`), `prep-audit.json`, `experiment.json`, `x_match.log`, `x_audit.log` and `mlaad-diagnostic.csv`.
+- **Compute:** balance 195.95 → 195.85 CU; CPU only, at 0.08 CU/h.
+- **Owner decision needed:** any shared preprocessing change is a recipe change. Options:
+  - (a) **Diagnostic only, CPU, about 1 h:** probe English train/select under the existing `codec_probe` treatments `crop_norm`, `crop_norm_lp7k` and `crop_norm_opus`. These are applied identically to both labels and change no thresholds. Choose and freeze a treatment from train-fit results, then re-audit once.
+  - (b) Keep English blocked pending other real/fake pairings.
+- **Resume, if a treatment is approved and implemented:** re-run `audit` with the same flags, then `catalog`, `pack`, `stage`, `pilot` and `teacher`, using the commands in the next section.
+
 ## English XTTS-only catalog and pack review (25 Nov 2026)
 
 Use the reviewed code on the VM before running the pilot. The old pilot replaced the language list with EER numbers after the first candidate and crashed on the second. Feature caches for the same index remain usable. The local suite passed 39 tests. The status of the live Drive audit was not observed during this review.
