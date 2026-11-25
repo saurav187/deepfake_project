@@ -39,6 +39,12 @@ XTTS_ONLY_TRAIN = {"xtts_v2"}
 
 def viable(rows, train_need=TRAIN_FAMILIES):
     check(rows)
+    if train_need == XTTS_ONLY_TRAIN:
+        for r in rows:
+            allowed = train_need if r["split"] == "train" else {"xtts_v2", "chatterboxtts"}
+            if (r["pair"] != "phonemedf" or r["language"] != "en"
+                    or (r["label"] == "1" and r["generator"] not in allowed)):
+                raise ValueError("Unexpected row in English XTTS-only experiment")
     for fold in ("train", "select", "calibrate", "threshold", "validate"):
         en = [
             r
@@ -96,6 +102,7 @@ def subset(rows, quotas=SUBSET_QUOTAS):
 
 
 def audit_selection(root, work, languages=("en", "hi"), train_need=TRAIN_FAMILIES):
+    selection_sha256 = digest(work / "selection.csv")
     rows = read(work / "selection.csv")
     hashes = {}
     features = {}
@@ -115,8 +122,10 @@ def audit_selection(root, work, languages=("en", "hi"), train_need=TRAIN_FAMILIE
     viable(kept, train_need)
     idx = [r for r in kept if r["id"] in features]
     report = panels(idx, [features[r["id"]] for r in idx], languages)
+    if digest(work / "selection.csv") != selection_sha256:
+        raise ValueError("Selection changed during audit")
     report.update(
-        selection_sha256=digest(work / "selection.csv"),
+        selection_sha256=selection_sha256,
         dropped=len(rows) - len(kept),
         counts=counts(kept),
     )
@@ -156,10 +165,12 @@ def catalog(root, work, languages=("en", "hi")):
     )
 
 
-def load_labels(work, rows):
+def load_labels(work, rows, inventory_path=None):
+    if inventory_path is None:
+        inventory_path = work / "inventory.csv"
     expected = {(r["group"], r["uid"]) for r in rows if r["group"] in SYSTEMS}
     if (
-        digest(work / "inventory.csv")
+        digest(inventory_path)
         != (work / "voice-inventory.sha256").read_text().strip()
     ):
         raise ValueError("Voice inventory mismatch")
@@ -250,7 +261,7 @@ def main():
                 write_csv(root / f"{work.name}-{a.microsoft}-jobs.csv", jobs)
                 return
         voice_dir = shared if a.voices == "wavlm" else a.data / "stage0-ecapa"
-        selected = match(rows, load_labels(voice_dir, rows), hindi, a.release)
+        selected = match(rows, load_labels(voice_dir, rows, shared / "inventory.csv"), hindi, a.release)
         if a.addons:
             selected = merge(root, selected, jobs, a.release)
         if a.release and not {"freevc24", "chatterboxtts", "gemini"} <= {
@@ -311,10 +322,25 @@ def main():
             != [[r[k] for k in [*FIELDS, "sha256"] if k != "path"] for r in eligible]
         ):
             raise ValueError("Pack requires audited catalog")
-        # An independent packed-byte audit binds Stage 2 to the resulting index.
+        viable(eligible, train_need)
+        if any(r["path"] != f"{work.name}/bytes/{r['id']}.audio" for r in rows):
+            raise ValueError("Catalog path belongs to a different experiment")
+        # The catalog hashes verified by pack bind the preparation audit to this index.
         catalog_path = root / (work.name + "-catalog.csv")
         write_csv(catalog_path, rows)
-        pack(a.data, catalog_path.name, work / "packed")
+        packed = work / "packed"
+        if packed.exists():
+            # A disconnect can land between publication of packed/ and audit.json.
+            # Reuse only an index describing precisely this audited catalog.
+            index = json.loads((packed / "index.json").read_text())
+            ordered = sorted(rows, key=lambda r: (r["split"], r["source"], r["id"]))
+            if [{k: r[k] for k in [*FIELDS, "sha256"]} for r in index] != ordered:
+                raise ValueError("Existing pack differs from the audited catalog")
+            checksums = json.loads((packed / "checksums.json").read_text())
+            if digest(packed / "index.json") != checksums["index.json"]:
+                raise ValueError("Existing pack has a corrupt index")
+        else:
+            pack(a.data, catalog_path.name, packed)
         report["index_sha256"] = digest(work / "packed" / "index.json")
         report["policy"] = POLICY
         tmp = work / "audit.tmp"

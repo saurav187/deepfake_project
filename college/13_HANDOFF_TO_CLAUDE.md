@@ -1,5 +1,29 @@
 # Pipeline v3 handoff for Claude
 
+## English XTTS-only catalog and pack review (25 Nov 2026)
+
+Use the reviewed code on the VM before running the pilot. The old pilot replaced the language list with EER numbers after the first candidate and crashed on the second. Feature caches for the same index remain usable. The local suite passed 39 tests. The status of the live Drive audit was not observed during this review.
+
+- Existing selection, eligible manifest, passing prep audit and catalog bytes remain usable when their hashes match. Confirm the digest of `$D/stage0/inventory.csv` equals the hash in `$D/stage0-ecapa/voice-inventory.sha256`. An old match checked the ECAPA inventory copy, even if the active inventory had changed. Investigate any mismatch before proceeding.
+- Audit and catalog separately crop the original member. Catalog verifies the resulting hash. Pack verifies the file against that hash, staging checks each requested shard, and payload verifies the exact indexed range. The model decodes the stored four-second crop and applies the requested view and normalization to both labels. See `stage0.py:29`, `data.py:125`, `data.py:161`, `data.py:192`, `audio.py:133` and `pilot.py:47`.
+- The parent intersection only removes rows. Viability and identity checks run after it and at pack time. Training admits only XTTS fakes in this experiment. The default recipe still requires XTTS and Melo. Evaluation requires Chatterbox in every fold. XTTS presence in evaluation is reported separately and is not a required cell. See `stage0.py:40`, `phonemedf.py:173`, `data.py:87`, `pilot.py:87` and `train.py:43`. Voice disjointness applies to inferred IDs.
+- A rerun of matching that changes the manifest, or a later failed preparation audit, now invalidates the older training authorization. The stage command checks before copying shards. Teacher requires a passing pilot on the same index and audited languages.
+- With one writer, interrupted catalog writes can be retried with the same command. Existing correct files are retained, but the source archives are scanned and crops recomputed. Pack streams one member at a time, holds row metadata in RAM and writes shards under a temporary directory. A hard kill before rename can leave unused temporary data. After rename, a retry compares the published index against the current audited catalog before restoring the audit binding. Stage verifies shard checksums as it copies. Source archive streaming and small Drive files dominate I/O. The matched IDs are 20 ASCII hex characters, so the USTAR member uses one 512-byte header, even at a new shard.
+- Only the development archives and inventories enter this route. The MLAAD diagnostic is a separate metadata output. No sealed audio or Colab runtime was accessed in the review.
+
+Set the paths and run only the interrupted or pending command, in order. Stop on a failed audit or pilot.
+
+```bash
+D=/content/drive/MyDrive/audio-v3
+W="$D/stage0-en-ecapa-xtts"
+L=/content/v3-local-en
+python3 -m pipeline_v3.stage0 catalog --data "$D" --languages en --voices ecapa --xtts-only
+python3 -m pipeline_v3.stage0 pack --data "$D" --languages en --voices ecapa --xtts-only
+python3 -m pipeline_v3.cli stage --data "$W" --packed "$W/packed" --local "$L" --splits train select
+python3 -m pipeline_v3.cli pilot --data "$W" --local "$L" --encoder "$D/models/xlsr" --small-encoder "$D/models/wavlm-base" --languages en
+python3 -m pipeline_v3.cli teacher --data "$W" --local "$L" --encoder "$D/models/xlsr" --languages en
+```
+
 <!-- ENGLISH-PILOT-RUN:START -->
 ## English pilot run — 25 Nov 2026 (Claude, unattended; owner approvals 08:18, ~09:00, ~09:10 IST)
 

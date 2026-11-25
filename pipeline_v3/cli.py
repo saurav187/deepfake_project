@@ -7,6 +7,20 @@ from pathlib import Path
 from .data import SPLITS, digest, pack, stage
 
 
+def bound_audit(work, index):
+    from .audit import require_passing
+
+    report = json.loads((work / "audit.json").read_text())
+    require_passing(report, digest(index))
+    if "selection_sha256" in report or (work / "prep-audit.json").exists():
+        prep = json.loads((work / "prep-audit.json").read_text())
+        if (prep != {k: v for k, v in report.items() if k != "index_sha256"}
+                or digest(work / "selection.csv") != prep["selection_sha256"]
+                or digest(work / "eligible.csv") != prep["eligible_sha256"]):
+            raise ValueError("Preparation audit or selection changed since pack")
+    return report
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
@@ -100,6 +114,8 @@ def main():
     elif cfg.action == "pack":
         pack(cfg.data, cfg.catalog, cfg.packed)
     elif cfg.action == "stage":
+        if (cfg.data / "prep-audit.json").exists():
+            bound_audit(cfg.data, cfg.packed / "index.json")
         stage(cfg.packed, cfg.local, cfg.splits)
     elif cfg.action == "audit":
         from .audit import audit
@@ -111,24 +127,22 @@ def main():
         if not result["pass"]:
             raise SystemExit("Nuisance controls failed")
     elif cfg.action == "pilot":
-        from .audit import require_passing
         from .pilot import pilot
 
-        audit_report = json.loads((cfg.data / "audit.json").read_text())
-        require_passing(audit_report, digest(cfg.local / "index.json"))
+        audit_report = bound_audit(cfg.data, cfg.local / "index.json")
         cfg.languages = sorted(set(cfg.languages))
         if audit_report.get("languages_audited", ["en", "hi"]) != cfg.languages:
             raise ValueError("Pilot languages differ from the audited languages")
         pilot(cfg)
     elif cfg.action in {"teacher", "student"}:
-        from .audit import require_passing
         from .train import train
 
-        audit = json.loads((cfg.data / "audit.json").read_text())
-        require_passing(audit, digest(cfg.local / "index.json"))
+        audit = bound_audit(cfg.data, cfg.local / "index.json")
         report = json.loads((cfg.data / "pilot.json").read_text())
         if not report.get("go") or report.get("index_sha256") != audit["index_sha256"]:
             raise ValueError("Pilot criteria have not passed for this pack")
+        if report.get("languages", ["en", "hi"]) != audit.get("languages_audited", ["en", "hi"]):
+            raise ValueError("Pilot and audit languages differ")
         train(cfg, cfg.action == "student")
     elif cfg.action == "export":
         from .export import export

@@ -205,7 +205,21 @@ def pilot(cfg):
                     if rep in {"full", "lfcc", "first4", "first6"}:
                         stats.update(bootstrap(dev, scores, 200))
                     report["models"][f"{tag}/{rep}/{method}/{view}"] = stats
-    selected = report["models"]
+    decisions = pilot_decisions(report["models"], rows, languages)
+    report.update(
+        index_sha256=digest(cfg.local / "index.json"),
+        criteria=decisions,
+        go=any(decisions.values()),
+    )
+    out = cfg.data / "pilot.json"
+    tmp = out.with_suffix(".tmp")
+    tmp.write_text(json.dumps(report, indent=2))
+    tmp.replace(out)
+    print(out)
+
+
+def pilot_decisions(selected, rows, languages):
+    """Apply the same frozen criteria independently to each candidate."""
     baseline = (
         selected["xlsr/lfcc/linear/clean"]["slices"].get("domain/unseen", {}).get("eer")
     )
@@ -217,7 +231,7 @@ def pilot(cfg):
         e = result["slices"].get("domain/unseen", {}).get("eer")
         o = opus["slices"].get("domain/unseen", {}).get("eer")
         coverage = result["eligible"] / result["selected"]
-        languages = [
+        language_eers = [
             result["slices"].get("language/" + lang + "/unseen", {}).get("eer")
             for lang in languages
         ]
@@ -227,20 +241,11 @@ def pilot(cfg):
                 for lab in ("0", "1")
             )
             >= 1000
-            and None not in (baseline, e, o, *languages)
+            and None not in (baseline, e, o, *language_eers)
             and e <= 0.20
             and baseline - e >= 0.03
             and o - e <= 0.05
-            and max(languages) <= 0.25
+            and max(language_eers) <= 0.25
             and coverage >= 0.95
         )
-    report.update(
-        index_sha256=digest(cfg.local / "index.json"),
-        criteria=decisions,
-        go=any(decisions.values()),
-    )
-    out = cfg.data / "pilot.json"
-    tmp = out.with_suffix(".tmp")
-    tmp.write_text(json.dumps(report, indent=2))
-    tmp.replace(out)
-    print(out)
+    return decisions
