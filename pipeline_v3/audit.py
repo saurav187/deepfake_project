@@ -121,9 +121,20 @@ def panels(rows, features, languages=("en", "hi")):
 
 
 def fit_controls(rows, features):
+    y = np.array([int(r["label"]) for r in rows])
+    train = np.array([r["split"] == "train" for r in rows])
+    reports = {
+        field: metrics(y[~train], scores) for field, scores in probe_scores(rows, features).items()
+    }
+    return assess(rows, reports)
+
+
+def probe_scores(rows, features):
+    """Per field (and joint): decision scores of the train-fitted probe on non-train rows,
+    in row order. fit_controls turns these into the audit AUCs."""
     train = np.array([r["split"] == "train" for r in rows])
     y = np.array([int(r["label"]) for r in rows])
-    reports = {}
+    out = {}
     for field in [*features[0], "joint"]:
         # The joint predictor combines every blocking field and excludes provenance.
         inputs = [
@@ -140,9 +151,8 @@ def fit_controls(rows, features):
             LogisticRegression(class_weight="balanced", max_iter=500),
         )
         model.fit([x for x, t in zip(inputs, train) if t], y[train])
-        scores = model.decision_function([x for x, t in zip(inputs, train) if not t])
-        reports[field] = metrics(y[~train], scores)
-    return assess(rows, reports)
+        out[field] = model.decision_function([x for x, t in zip(inputs, train) if not t])
+    return out
 
 
 def assess(rows, reports):
