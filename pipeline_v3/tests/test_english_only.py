@@ -54,3 +54,28 @@ def test_subset_is_deterministic_and_keeps_parents():
     assert sum(r["split"] == "train" for r in fakes) == 12
     assert len({r["speaker"] for r in fakes if r["split"] == "train"}) == 6  # round-robin
     assert {r["parent"] for r in fakes} == {r["parent"] for r in a if r["label"] == "0"}
+
+
+def test_xtts_only_train_cell_is_opt_in():
+    import pytest
+
+    from pipeline_v3.stage0 import XTTS_ONLY_TRAIN, viable
+
+    rows = []
+    for fold, gen, n in (("train", "xtts_v2", 20), ("select", "chatterboxtts", 5),
+                         ("calibrate", "chatterboxtts", 5), ("threshold", "chatterboxtts", 5),
+                         ("validate", "chatterboxtts", 5)):
+        for i in range(n):
+            base = dict(language="en", split=fold, pair="phonemedf", speaker=f"{fold}{i}",
+                        parent=f"{fold}{i}", source="libri", text=f"{fold}{i}")
+            rows.append(dict(base, id=f"r{fold}{i}", label="0", generator="genuine"))
+            rows.append(dict(base, id=f"f{fold}{i}", label="1", generator=gen))
+    import pipeline_v3.stage0 as s0
+    orig = s0.check
+    s0.check = lambda rows: None
+    try:
+        with pytest.raises(ValueError, match="Missing English generator cell in train"):
+            viable(rows)
+        viable(rows, XTTS_ONLY_TRAIN)
+    finally:
+        s0.check = orig

@@ -31,7 +31,13 @@ def transformed(root, rows):
         yield r, fixed_crop(b) if r["pair"] == "phonemedf" else b
 
 
-def viable(rows):
+TRAIN_FAMILIES = {"xtts_v2", "melotts"}
+# Owner-approved separate experiment (25 Nov 2026, option B): English XTTS-only train cell,
+# Chatterbox still fully held out. The default two-generator recipe above is unchanged.
+XTTS_ONLY_TRAIN = {"xtts_v2"}
+
+
+def viable(rows, train_need=TRAIN_FAMILIES):
     check(rows)
     for fold in ("train", "select", "calibrate", "threshold", "validate"):
         en = [
@@ -41,7 +47,7 @@ def viable(rows):
         ]
         if len({r["speaker"] for r in en}) < (20 if fold == "train" else 5):
             raise ValueError("Insufficient PhonemeDF readers in " + fold)
-        need = {"xtts_v2", "melotts"} if fold == "train" else {"chatterboxtts"}
+        need = set(train_need) if fold == "train" else {"chatterboxtts"}
         if not need <= {r["generator"] for r in en}:
             raise ValueError("Missing English generator cell in " + fold)
 
@@ -89,7 +95,7 @@ def subset(rows, quotas=SUBSET_QUOTAS):
     ]
 
 
-def audit_selection(root, work, languages=("en", "hi")):
+def audit_selection(root, work, languages=("en", "hi"), train_need=TRAIN_FAMILIES):
     rows = read(work / "selection.csv")
     hashes = {}
     features = {}
@@ -106,7 +112,7 @@ def audit_selection(root, work, languages=("en", "hi")):
 
     joined = parents("0") & parents("1")
     kept = [dict(r, sha256=hashes[r["id"]]) for r in available if r["parent"] in joined]
-    viable(kept)
+    viable(kept, train_need)
     idx = [r for r in kept if r["id"] in features]
     report = panels(idx, [features[r["id"]] for r in idx], languages)
     report.update(
@@ -197,16 +203,25 @@ def main():
         default="wavlm",
         help="voice-label source: stage0/voices.csv (WavLM) or stage0-ecapa/voices.csv",
     )
+    p.add_argument(
+        "--xtts-only",
+        action="store_true",
+        help="separately named English experiment: XTTS-v2 is the only train family, "
+        "MeloTTS rows are dropped, Chatterbox stays held out; products in <stage>-...-xtts/",
+    )
     a = p.parse_args()
     languages = sorted(set(a.languages))
     if a.subset and (languages != ["en"] or a.release or a.addons):
         raise SystemExit("--subset is only for the English-only Stage 1/2 pilot")
+    if a.xtts_only and (languages != ["en"] or a.voices != "ecapa" or a.release or a.addons or a.subset):
+        raise SystemExit("--xtts-only requires --languages en --voices ecapa (Stage 1/2 only)")
+    train_need = XTTS_ONLY_TRAIN if a.xtts_only else TRAIN_FAMILIES
     root = a.data / "development"
     work = a.data / ("stage5" if a.release else "stage3" if a.addons else "stage0")
     if languages == ["en"]:
         work = work.with_name(work.name + ("-en-subset" if a.subset else "-en"))
     if a.voices == "ecapa":
-        work = work.with_name(work.name + "-ecapa")
+        work = work.with_name(work.name + "-ecapa" + ("-xtts" if a.xtts_only else ""))
     elif languages != ["en", "hi"]:
         raise SystemExit("Hindi-only runs are not supported; English is always required")
     if a.action == "proof":
@@ -244,6 +259,17 @@ def main():
             raise ValueError(
                 "Stage 5 requires completed add-on jobs and all release families"
             )
+        if a.xtts_only:
+            selected = [r for r in selected if r["generator"] != "melotts"]
+            fakes = {r["parent"] for r in selected if r["label"] == "1" and r["language"] == "en"}
+            selected = [r for r in selected if r["label"] == "1" or r["parent"] in fakes]
+            (work / "experiment.json").write_text(json.dumps({
+                "kind": "ENGLISH XTTS-ONLY EXPERIMENT (owner option B, 25 Nov 2026)",
+                "train_families": sorted(XTTS_ONLY_TRAIN),
+                "held_out": ["chatterboxtts"],
+                "excluded": ["melotts"],
+                "voices": "stage0-ecapa/voices.csv, frozen rule ecapa-reference-floor-v1",
+            }, indent=2))
         if a.subset:
             full = len(selected)
             selected = subset(selected)
@@ -260,7 +286,7 @@ def main():
                 )
             )
         print(json.dumps(counts(selected), indent=2))
-        viable(selected)
+        viable(selected, train_need)
         write_csv(work / "selection.csv", selected)
         from .diagnostic_panel import mlaad_panel
 
@@ -268,7 +294,7 @@ def main():
         if diag:
             write_csv(work / "mlaad-diagnostic.csv", diag)
     elif a.action == "audit":
-        audit_selection(root, work, languages)
+        audit_selection(root, work, languages, train_need)
     elif a.action == "catalog":
         catalog(root, work, languages)
     else:
