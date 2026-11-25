@@ -46,6 +46,49 @@ def viable(rows):
             raise ValueError("Missing English generator cell in " + fold)
 
 
+# Owner-authorized smaller English pilot (25 Nov 2026): fake quotas per fold and family,
+# fixed before any detector score exists. Genuine rows are exactly the parents of kept fakes.
+SUBSET_QUOTAS = {
+    "train": {"xtts_v2": 1500, "melotts": 1500},
+    "select": {"xtts_v2": 600, "chatterboxtts": 600},
+    "calibrate": {"xtts_v2": 150, "chatterboxtts": 150},
+    "threshold": {"xtts_v2": 150, "chatterboxtts": 150},
+    "validate": {"xtts_v2": 150, "chatterboxtts": 150},
+}
+
+
+def _h(text):
+    return hashlib.sha256(("subset-v1/" + text).encode()).hexdigest()
+
+
+def subset(rows, quotas=SUBSET_QUOTAS):
+    """Deterministic reader-round-robin fake quotas; keeps matched parents, never adds rows."""
+    cells = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        if r["language"] == "en" and r["label"] == "1":
+            cells[r["split"], r["generator"]][r["speaker"]].append(r)
+    kept = set()
+    for (split, gen), readers in cells.items():
+        quota = quotas.get(split, {}).get(gen, 0)
+        queues = [
+            sorted(v, key=lambda r: _h(r["id"]))
+            for _, v in sorted(readers.items(), key=lambda kv: _h(kv[0]))
+        ]
+        taken = 0
+        while taken < quota and any(queues):
+            for q in queues:
+                if q and taken < quota:
+                    kept.add(q.pop(0)["id"])
+                    taken += 1
+    parents = {r["parent"] for r in rows if r["id"] in kept}
+    return [
+        r
+        for r in rows
+        if r["language"] == "en"
+        and (r["id"] in kept or (r["label"] == "0" and r["parent"] in parents))
+    ]
+
+
 def audit_selection(root, work, languages=("en", "hi")):
     rows = read(work / "selection.csv")
     hashes = {}
@@ -142,12 +185,20 @@ def main():
         default=["en", "hi"],
         help="'--languages en' is the English-only path; its products live in <stage>-en/",
     )
+    p.add_argument(
+        "--subset",
+        action="store_true",
+        help="explicitly labelled smaller English pilot (requires --languages en); "
+        "products live in <stage>-en-subset/",
+    )
     a = p.parse_args()
     languages = sorted(set(a.languages))
+    if a.subset and (languages != ["en"] or a.release or a.addons):
+        raise SystemExit("--subset is only for the English-only Stage 1/2 pilot")
     root = a.data / "development"
     work = a.data / ("stage5" if a.release else "stage3" if a.addons else "stage0")
     if languages == ["en"]:
-        work = work.with_name(work.name + "-en")
+        work = work.with_name(work.name + ("-en-subset" if a.subset else "-en"))
     elif languages != ["en", "hi"]:
         raise SystemExit("Hindi-only runs are not supported; English is always required")
     if a.action == "proof":
@@ -183,6 +234,21 @@ def main():
         }:
             raise ValueError(
                 "Stage 5 requires completed add-on jobs and all release families"
+            )
+        if a.subset:
+            full = len(selected)
+            selected = subset(selected)
+            (work / "subset.json").write_text(
+                json.dumps(
+                    {
+                        "kind": "SMALLER ENGLISH PILOT SUBSET (not the full run)",
+                        "quotas": SUBSET_QUOTAS,
+                        "rule": "subset-v1 sha256 reader round-robin; parents of kept fakes",
+                        "full_selection_rows": full,
+                        "subset_rows": len(selected),
+                    },
+                    indent=2,
+                )
             )
         print(json.dumps(counts(selected), indent=2))
         viable(selected)

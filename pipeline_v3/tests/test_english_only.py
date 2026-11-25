@@ -32,3 +32,25 @@ def test_unconfigured_language_rows_fail_closed():
     rows, features = _panel(acoustic_cue=False)
     with pytest.raises(ValueError):
         panels(rows, features, ["en"])
+
+
+def test_subset_is_deterministic_and_keeps_parents():
+    from pipeline_v3.stage0 import subset
+
+    rows = []
+    for split in ("train", "select"):
+        for reader in range(6):
+            for k in range(10):
+                parent = f"p-{split}-{reader}-{k}"
+                rows.append(dict(id=parent + "-r", label="0", split=split, language="en",
+                                 speaker=f"s{reader}", parent=parent, generator="-"))
+                gen = "xtts_v2" if split == "train" else "chatterboxtts"
+                rows.append(dict(id=parent + "-f", label="1", split=split, language="en",
+                                 speaker=f"s{reader}", parent=parent, generator=gen))
+    quotas = {"train": {"xtts_v2": 12}, "select": {"chatterboxtts": 6}}
+    a, b = subset(rows, quotas), subset(list(reversed(rows)), quotas)
+    assert {r["id"] for r in a} == {r["id"] for r in b}
+    fakes = [r for r in a if r["label"] == "1"]
+    assert sum(r["split"] == "train" for r in fakes) == 12
+    assert len({r["speaker"] for r in fakes if r["split"] == "train"}) == 6  # round-robin
+    assert {r["parent"] for r in fakes} == {r["parent"] for r in a if r["label"] == "0"}
