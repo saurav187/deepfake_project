@@ -51,7 +51,21 @@ Restart only through the guard (no-op if running): `colab --auth=oauth2 ssh -s v
   - Reading: the model-view preprocessing (trim + centre crop + level) removes the edge, bandwidth and level cues (the upper-band difference was the silent edges, not the speech spectrum). **One cue remains: `speech_ratio` ≈ 0.73** (share of active 10 ms frames in the 4 s window — pause/rhythm structure of Kathbath reading vs IndicSynth voices). Re-encoding and low-pass do not change it. Under the approved policy, **Hindi fails the acoustic gate** even in the best treatment; thresholds were NOT loosened and Hindi was NOT dropped.
   - Whether `speech_ratio` is a nuisance (corpus reading style) or a genuine synthesis cue (TTS pausing) is a research judgement for the owner. Options for the morning: (a) choose crops by matched speech activity (sample the 4 s window from the most-voiced region of BOTH labels, or match windows on speech_ratio) and re-measure; (b) add Hindi data whose real and fake share recording style (owner's Hindi recordings + Hindi Gemini/Microsoft fakes of the same texts); (c) keep the pilot English-only and report Hindi as blocked.
 
-**Next steps / decisions for the owner:** *pending*
+**Next steps / decisions for the owner (morning)**
+1. **Voice labelling speed.** On this 2-vCPU CPU VM it runs at ~1,000 clips/h (MEASURED), so the ~85,600 fakes would take ~3.5 days — longer than the session lives. It resumes from `stage0/sv.sqlite` on Drive. Recommended (needs your OK + an interactive Drive mount, so not done tonight): finish on a GPU session. T4 ≈ 1.2 CU/h (third-party rate); expected well under an hour of GPU, i.e. ~1–2 CU. **The SQLite cache allows one writer: stop the CPU job first.**
+   ```bash
+   # 1) stop the CPU job cleanly (progress is committed every 256 clips)
+   colab --auth=oauth2 ssh -s v3-data -- 'kill $(cat /content/stage1.pid); sleep 5; pkill -f "[p]ipeline_v3.voice_labels"; ps -eo pid,args | grep -c "[v]oice_labels"'
+   # 2) GPU session (interactive Drive mount required)
+   colab --auth=oauth2 new -s v3-gpu --gpu T4
+   colab --auth=oauth2 drivemount -s v3-gpu
+   git archive --format=tar --output=/tmp/v3-code.tar pipeline-v3-scratch pipeline_v3 colab college/DOWNLOAD_PLAN.sh
+   colab --auth=oauth2 upload -s v3-gpu /tmp/v3-code.tar /content/v3-code.tar
+   colab --auth=oauth2 ssh -s v3-gpu -- 'mkdir -p /content/v3-src && tar -xf /content/v3-code.tar -C /content/v3-src && cd /content/v3-src && nohup python3 -m pipeline_v3.voice_labels --data /content/drive/MyDrive/audio-v3 --batch 32 > /content/voice.log 2>&1 &'
+   ```
+   Then `match → audit → catalog → pack` (commands in `17_STAGE0_REPORT.md`, all with `--data /content/drive/MyDrive/audio-v3`), on the CPU or GPU session.
+2. **Hindi gate** (see codec probe v2): Hindi fails on `speech_ratio` ≈ 0.73 even with crop + level normalisation. Decide between matched-activity cropping (code change + re-measure), new Hindi data with shared recording style, or an English-only pilot with Hindi reported as blocked.
+3. Untracked owner files left untouched: `college/14_CODEX_ENGLISH_DATA_PROMPT.md`, `college/16_CODEX_STAGE0_PROMPT.md`.
 <!-- OVERNIGHT-STAGE1:END -->
 
 
