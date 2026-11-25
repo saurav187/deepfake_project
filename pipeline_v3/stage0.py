@@ -154,13 +154,20 @@ def audit_selection(root, work, languages=("en", "hi"), train_need=TRAIN_FAMILIE
         raise ValueError(f"Nuisance gate failed; see {work / 'prep-audit.json'}")
 
 
+def exploratory_ok(work, report):
+    """A failed report proceeds only in a recorded exploratory run (exploratory.py)."""
+    from .exploratory import EXPLORATORY_SUFFIX, exception_for
+
+    return work.name.endswith(EXPLORATORY_SUFFIX) and exception_for(work, report)
+
+
 def catalog(root, work, languages=("en", "hi"), treatment=None, crops=None):
     report = json.loads((work / "prep-audit.json").read_text())
     if (
         (report.get("treatment") or {}).get("treatment") != treatment
         or report.get("policy") != POLICY
         or report.get("languages_audited") != sorted(languages)
-        or not report["pass"]
+        or not (report["pass"] or exploratory_ok(work, report))
         or digest(work / "eligible.csv") != report["eligible_sha256"]
         or digest(work / "selection.csv") != report["selection_sha256"]
     ):
@@ -244,6 +251,12 @@ def main():
         "en_treatment.py) of the original selection; products in <...-xtts>-<treatment>/",
     )
     p.add_argument("--crop-cache", type=Path, help="verified en_treatment crop cache")
+    p.add_argument(
+        "--exploratory",
+        action="store_true",
+        help="owner-approved exploratory baseline on the FAILED frozen-norm audit "
+        "(exploratory.py); products in <...-norm>-exploratory/, catalog/pack only",
+    )
     a = p.parse_args()
     languages = sorted(set(a.languages))
     if a.subset and (languages != ["en"] or a.release or a.addons):
@@ -252,6 +265,8 @@ def main():
         raise SystemExit("--xtts-only requires --languages en --voices ecapa (Stage 1/2 only)")
     if (a.treatment or a.crop_cache) and not a.xtts_only:
         raise SystemExit("--treatment/--crop-cache are only for the English XTTS-only run")
+    if a.exploratory and (a.treatment != "norm" or a.action not in {"catalog", "pack"}):
+        raise SystemExit("--exploratory reuses the failed frozen-norm audit: catalog/pack only")
     if a.treatment and a.action in {"match", "jobs", "inventory", "proof"}:
         raise SystemExit("A treated run reuses the original selection; it never re-matches")
     train_need = XTTS_ONLY_TRAIN if a.xtts_only else TRAIN_FAMILIES
@@ -263,6 +278,7 @@ def main():
         work = work.with_name(
             work.name + "-ecapa" + ("-xtts" if a.xtts_only else "")
             + (f"-{a.treatment}" if a.treatment else "")
+            + ("-exploratory" if a.exploratory else "")
         )
     elif languages != ["en", "hi"]:
         raise SystemExit("Hindi-only runs are not supported; English is always required")
@@ -363,7 +379,7 @@ def main():
             (report.get("treatment") or {}).get("treatment") != a.treatment
             or report.get("policy") != POLICY
             or report.get("languages_audited") != languages
-            or not report["pass"]
+            or not (report["pass"] or exploratory_ok(work, report))
             or digest(work / "eligible.csv") != report["eligible_sha256"]
             or digest(work / "selection.csv") != report["selection_sha256"]
             or [[r[k] for k in [*FIELDS, "sha256"] if k != "path"] for r in rows]
@@ -391,6 +407,8 @@ def main():
             pack(a.data, catalog_path.name, packed)
         report["index_sha256"] = digest(work / "packed" / "index.json")
         report["policy"] = POLICY
+        if not report["pass"]:
+            report["exception"] = exploratory_ok(work, report)
         tmp = work / "audit.tmp"
         tmp.write_text(json.dumps(report, indent=2))
         tmp.replace(work / "audit.json")

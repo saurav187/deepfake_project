@@ -11,10 +11,24 @@ def bound_audit(work, index):
     from .audit import require_passing
 
     report = json.loads((work / "audit.json").read_text())
-    require_passing(report, digest(index))
+    if report.get("pass") or "exception" not in report:
+        require_passing(report, digest(index))
+    else:
+        # Owner-approved exploratory run on a failed audit (exploratory.py): the record
+        # must match the failed report exactly; policy and pack binding still apply.
+        from .audit import POLICY
+        from .exploratory import exception_for
+
+        prep = json.loads((work / "prep-audit.json").read_text())
+        if (
+            report.get("policy") != POLICY
+            or report.get("index_sha256") != digest(index)
+            or exception_for(work, prep) != report["exception"]
+        ):
+            raise ValueError("Exploratory exception is not bound to this pack")
     if "selection_sha256" in report or (work / "prep-audit.json").exists():
         prep = json.loads((work / "prep-audit.json").read_text())
-        if (prep != {k: v for k, v in report.items() if k != "index_sha256"}
+        if (prep != {k: v for k, v in report.items() if k not in {"index_sha256", "exception"}}
                 or digest(work / "selection.csv") != prep["selection_sha256"]
                 or digest(work / "eligible.csv") != prep["eligible_sha256"]):
             raise ValueError("Preparation audit or selection changed since pack")
@@ -137,6 +151,11 @@ def main():
     elif cfg.action in {"teacher", "student"}:
         from .train import train
 
+        if cfg.action == "student":
+            from .exploratory import refuse
+
+            refuse(cfg.data, "Student training")
+
         audit = bound_audit(cfg.data, cfg.local / "index.json")
         report = json.loads((cfg.data / "pilot.json").read_text())
         if not report.get("go") or report.get("index_sha256") != audit["index_sha256"]:
@@ -144,6 +163,8 @@ def main():
         if report.get("languages", ["en", "hi"]) != audit.get("languages_audited", ["en", "hi"]):
             raise ValueError("Pilot and audit languages differ")
         train(cfg, cfg.action == "student")
+    elif cfg.action in {"export", "evaluate", "benchmark"} and (cfg.data / "exception.json").exists():
+        raise ValueError(f"{cfg.action} is not allowed for an exploratory failed-audit run")
     elif cfg.action == "export":
         from .export import export
 
