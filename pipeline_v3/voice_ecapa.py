@@ -3,7 +3,7 @@
 Owner-authorized 25 Nov 2026 after WavLM-SV collapsed (ten references nearly inseparable).
 Products live in DATA/stage0-ecapa/ (own SQLite checkpoint, voices.csv, reports); the
 WavLM cache in DATA/stage0/ is never opened for writing. Same confidence rule as
-voice_labels.classify (best >= 0.86 on both views, same argmax, margin >= 0.08), same
+rule shape as voice_labels.classify (same argmax, margin >= 0.08) with an ECAPA floor frozen by `calibrate` (rule.json), same
 voice-disjoint fold map. Views: two non-overlapping <=3 s windows of the speech-active
 span (energy-gated trim, audio.prepare); clips whose active span is < 2 s are unknown.
 
@@ -33,7 +33,7 @@ import numpy as np
 
 from .data import digest
 from .phonemedf import FOLDS, REFS, SYSTEMS, VOICE_FOLD, archive_name, assign, member_id, write_csv
-from .voice_labels import classify, unit
+from .voice_labels import unit
 
 REPO = "speechbrain/spkrec-ecapa-voxceleb"
 TAG = "ecapa-active-views-v1"
@@ -201,56 +201,82 @@ def refs_report(data, work):
     print(json.dumps(report, indent=2))
 
 
+def classify_rule(views, references, floor, margin):
+    """Frozen ECAPA rule: both views choose one voice, min best >= floor, min margin >= margin."""
+    scores = views @ references.T
+    order = np.sort(scores, axis=1)
+    best = scores.argmax(axis=1)
+    lo, mg = float(order[:, -1].min()), float((order[:, -1] - order[:, -2]).min())
+    ok = best[0] == best[1] and lo >= floor and mg >= margin
+    return (REFS[best[0]] if ok else "unknown"), lo, mg
+
+
+def fold_table(rows, reader):
+    folds = defaultdict(lambda: {"clips": 0, "readers": set(), "voices": set()})
+    for r in rows:
+        g = r["group"]
+        split = assign("librispeech/" + reader[g, r["uid"]])
+        target = "train" if r["voice"] == "builtin-cohort" else VOICE_FOLD.get(r["voice"])
+        if target == split and not (g == "ChatterboxTTS" and split == "train"):
+            folds[split]["clips"] += 1
+            folds[split]["readers"].add(reader[g, r["uid"]])
+            folds[split]["voices"].add(r["voice"])
+    return {
+        f: {"pairs": folds[f]["clips"], "readers": len(folds[f]["readers"]), "voices": sorted(folds[f]["voices"])}
+        for f in FOLDS
+    }
+
+
 def label(data, work, k):
-    db, _ = open_db(data, work)
+    """Apply the frozen rule.json to XTTSv2/Chatterbox; MeloTTS rows come from WavLM's voices.csv."""
+    rule = json.loads((work / "rule.json").read_text())
+    if not rule.get("supported") or rule["rule"] != "ecapa-reference-floor-v1":
+        raise ValueError("No supported frozen ECAPA rule")
+    db, model_dir = open_db(data, work)
+    if (model_dir / "revision.txt").read_text() != rule["revision"]:
+        raise ValueError("Rule was calibrated on another model revision")
     _, A = anchors(db)
     with (work / "inventory.csv").open() as f:
         inv = [r for r in csv.DictReader(f) if r["group"] in SYSTEMS]
     reader = {(r["group"], r["uid"]): r["reader"] for r in inv}
-    out, report = [], {"sample_every": k, "systems": {}}
-    from sklearn.cluster import MiniBatchKMeans
-
-    for g in SYSTEMS:
-        rejected, start = [], len(out)
+    report = {"rule": {x: rule[x] for x in ("rule", "floor", "margin", "strict_floor_sensitivity_only")},
+              "sample_every": k, "labels": "INFERRED", "systems": {}}
+    out, strict = [], []
+    for g in ("XTTSv2", "ChatterboxTTS"):
+        rows, srows = [], []
         for uid, v in vectors(db, g):
-            voice, score, margin = classify(v, A) if v is not None else ("unknown", 0, 0)
-            if g == "MeloTTS":
-                voice = "unknown"
-            out.append({"group": g, "uid": uid, "voice": voice, "score": score, "margin": margin, "cluster": "-"})
-            if v is not None and voice == "unknown" and (v @ A.T).max() < 0.65 and v[0] @ v[1] >= 0.80:
-                rejected.append((len(out) - 1, unit(v.mean(0))))
-        if len(rejected) >= 50:
-            X = np.stack([v for _, v in rejected])
-            km = MiniBatchKMeans(n_clusters=min(10, len(X) // 25), random_state=41, n_init=3).fit(X)
-            centers = unit(km.cluster_centers_)
-            freq = Counter(km.labels_)
-            for (idx, v), lab in zip(rejected, km.labels_, strict=True):
-                out[idx]["cluster"] = f"{g}-{lab}"
-                if g == "MeloTTS" and freq[lab] >= 25 and v @ centers[lab] >= 0.88:
-                    out[idx]["voice"] = "builtin-cohort"
-        rows = out[start:]
-        if not rows:
-            continue
-        folds = defaultdict(lambda: {"clips": 0, "readers": set(), "voices": set()})
-        for r in rows:
-            split = assign("librispeech/" + reader[g, r["uid"]])
-            target = "train" if r["voice"] == "builtin-cohort" else VOICE_FOLD.get(r["voice"])
-            if target == split and not (g == "ChatterboxTTS" and split == "train"):
-                folds[split]["clips"] += 1
-                folds[split]["readers"].add(reader[g, r["uid"]])
-                folds[split]["voices"].add(r["voice"])
-        sc = np.array([r["score"] for r in rows])
-        mg = np.array([r["margin"] for r in rows])
+            if v is None:
+                voice, lo, mg, sv = "unknown", 0.0, 0.0, "unknown"
+            else:
+                voice, lo, mg = classify_rule(v, A, rule["floor"], rule["margin"])
+                sv = classify_rule(v, A, rule["strict_floor_sensitivity_only"], rule["margin"])[0]
+            rows.append({"group": g, "uid": uid, "voice": voice, "score": lo, "margin": mg, "cluster": "-"})
+            srows.append({"group": g, "uid": uid, "voice": sv})
+        out += rows
+        strict += srows
         report["systems"][g] = {
             "embedded": len(rows),
-            "voices": dict(Counter(r["voice"] for r in rows).most_common()),
-            "best_score_pct_5_25_50_75_95": np.percentile(sc, [5, 25, 50, 75, 95]).round(3).tolist(),
-            "margin_pct_5_25_50_75_95": np.percentile(mg, [5, 25, 50, 75, 95]).round(3).tolist(),
-            "retained_by_fold": {
-                f: {"clips": folds[f]["clips"], "projected_full": folds[f]["clips"] * k,
-                    "readers": len(folds[f]["readers"]), "voices": sorted(folds[f]["voices"])}
-                for f in FOLDS
+            "accepted": sum(r["voice"] != "unknown" for r in rows),
+            "acceptance_rate": sum(r["voice"] != "unknown" for r in rows) / max(1, len(rows)),
+            "unknown": sum(r["voice"] == "unknown" for r in rows),
+            "targets": dict(Counter(r["voice"] for r in rows if r["voice"] != "unknown").most_common()),
+            "folds": fold_table(rows, reader),
+            "strict_sensitivity": {
+                "acceptance_rate": sum(r["voice"] != "unknown" for r in srows) / max(1, len(srows)),
+                "folds": fold_table(srows, reader),
             },
+        }
+    melo = [r for r in csv.DictReader((data / "stage0" / "voices.csv").open()) if r["group"] == "MeloTTS"] \
+        if (data / "stage0" / "voices.csv").exists() else []
+    if melo:
+        if (data / "stage0" / "voice-inventory.sha256").read_text().strip() != digest(work / "inventory.csv"):
+            raise ValueError("WavLM Melo labels belong to another inventory")
+        out += melo
+        report["systems"]["MeloTTS"] = {
+            "source": "WavLM stage0/voices.csv (built-in voices; train-only cohort)",
+            "embedded": len(melo),
+            "voices": dict(Counter(r["voice"] for r in melo)),
+            "folds": fold_table(melo, reader),
         }
     name = "sample" if k > 1 else "full"
     (work / f"label-report-{name}.json").write_text(json.dumps(report, indent=2))
