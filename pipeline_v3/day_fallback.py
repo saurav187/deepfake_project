@@ -22,14 +22,30 @@ from .day_target import VIEWS, reference, table
 from .v2a import V1, save
 
 OUT = "fallback-detector-v1"
+# Local source copy detector/pretrained/wav2vec2-xls-r-300m, the encoder the heads were trained with.
+ENCODER_SHA256 = {
+    "config.json": "0bffa0d0e98153e883b828d86491f3c6062cb563dc9d7a9cfd1790da30c286ac",
+    "preprocessor_config.json": "a2254a5b58f72cd4de3632f8eee64f3f098b7c1402128d2f419e7d00ae13e335",
+    "pytorch_model.bin": "d5e490574712ad0a6736923b9ed11d4cd51c78609c36205f704fc4e87b11d2e0",
+}
+
+
+def file_sha(path):
+    with open(path, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--data", type=Path, required=True)
+    p.add_argument("--provenance", type=Path, required=True,
+                   help="JSON with the release audit manifest's train/dev PCM hashes")
     a = p.parse_args()
 
+    from detector.audio import decode as det_decode
+    from detector.audio import pcm_hash
     from detector.inference import Detector
+    from detector.model.ssl import ENCODERS
 
     from .adapters import selected_members
     from .audio import channel, decode
@@ -40,7 +56,15 @@ def main():
     root = a.data
     work = root / "v2/day-target-1" / OUT
     work.mkdir(parents=True, exist_ok=True)
+    enc = Path(ENCODERS["wav2vec2-xls-r-300m"])
+    for name, want in ENCODER_SHA256.items():
+        if file_sha(enc / name) != want:
+            raise ValueError(f"Encoder file differs from the training copy: {name}")
     det = Detector()
+    prov = json.loads(a.provenance.read_text())
+    if prov["provenance"]["audit_manifest_sha256"] != det.release["audit_manifest_sha256"]:
+        raise ValueError("Provenance is not from the release's audit manifest")
+    trained = set(prov["hashes"])
     original = reference(root / V1)
     ref = {(r["id"], r["channel"]): r for r in original}
     needed = {uid for uid, _ in ref}
@@ -51,9 +75,10 @@ def main():
         "release_sha256": det.release_sha256,
         "members": [m["checkpoint_sha256"] for m in det.release["members"]],
         "threshold_likely_fake": det.t_fake,
-        "teacher_scores": hashlib.sha256(
-            (root / V1 / "runs/teacher-eval-clips.csv").read_bytes()
-        ).hexdigest(),
+        "encoder_sha256": ENCODER_SHA256,
+        "teacher_scores": file_sha(root / V1 / "runs/teacher-eval-clips.csv"),
+        "provenance": prov["provenance"],
+        "provenance_file_sha256": file_sha(a.provenance),
     }
     bpath = work / "inputs.json"
     if bpath.exists() and json.loads(bpath.read_text()) != binding:
@@ -75,7 +100,7 @@ def main():
         if b is None:
             raise ValueError("Previously eligible comparison clip failed")
         crop, full = decode(b), decode(raw)
-        rec = {}
+        rec = {"_overlap": pcm_hash(det_decode(raw)[0]) in trained}
         for view in VIEWS:
             if (r["id"], view) in ref:
                 rec[view] = {"paired": one(channel(crop, view)), "full": one(channel(full, view))}
@@ -83,22 +108,31 @@ def main():
         if i % 100 == 0:
             print(f"Fallback panel {i}/{len(pending)}", flush=True)
 
-    report, excluded = {}, defaultdict(int)
+    report, excluded, overlap = {}, defaultdict(int), []
+    for row in rows:
+        if json.loads(output(row["id"]).read_text())["_overlap"]:
+            overlap.append(row["id"])
     for kind in ("paired", "full"):
         scored = []
         for row in rows:
-            for view, v in json.loads(output(row["id"]).read_text()).items():
+            rec = json.loads(output(row["id"]).read_text())
+            if rec.pop("_overlap"):
+                continue  # exact training/dev content: excluded and logged
+            for view, v in rec.items():
                 s = v[kind]
                 if s["p"] is None:  # insufficient audio: counted as not flagged, logged
                     excluded[f"{kind}/{view}/{ref[row['id'], view]['label']}"] += 1
                 scored.append(dict(ref[row["id"], view], p=-1.0 if s["p"] is None else s["p"]))
-        if len(scored) != len(ref):
+        if len(scored) + sum(
+            (o, v) in ref for o in overlap for v in VIEWS
+        ) != len(ref):
             raise ValueError("Incomplete fallback scores")
         report[kind] = table(scored, det.t_fake)
     report.update(
         inputs=binding,
+        exact_training_overlap_excluded=overlap,
         insufficient_audio_counted_not_flagged=dict(excluded),
-        operating_point="release v1 likely_fake p >= %.4f (5%% FA / 5%% miss dev budget, frozen)" % det.t_fake,
+        operating_point=f"release v1 likely_fake p >= {det.t_fake:.4f} (5% FA / 5% miss dev budget, frozen)",
         scope="Previously inspected English MLAAD development panel, simulated channels. Real calls unmeasured.",
     )
     save(work / "result.json", report)
