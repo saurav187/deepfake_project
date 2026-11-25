@@ -1,5 +1,25 @@
 # Pipeline v3 handoff for Claude
 
+## Exploratory English Teacher V1 baseline: PREPARED, not run (25 Nov 2026, Claude)
+
+The owner approved a separately named exploratory baseline on the frozen-norm PhonemeDF selection despite its failed audit. The code is at `f408e0d` and awaits the final Codex review (`college/21_CODEX_EXPLORATORY_TEACHER_REVIEW.md`). **No GPU is running, and nothing has been trained.**
+
+- **Exception:** `pipeline_v3/exploratory.py` creates `stage0-en-ecapa-xtts-norm-exploratory/` holding byte copies of the failed selection, eligible manifest and `prep-audit.json`, plus `exception.json`.
+  - `exception.json` records the approval, the failed fields and AUCs, the failed report's sha256 and the scope.
+  - A failed audit passes catalog/pack/stage/pilot/teacher **only** in that directory with a matching record. The default gate and every other run are unchanged.
+  - Student, export, evaluate and benchmark refuse the run, so it can never reach the sealed sets.
+- **Chain:** `pipeline_v3/run_exploratory.sh`.
+  1. Create the exception, then cache the crops.
+  2. Catalog and pack with `--treatment norm --crop-cache --exploratory`.
+  3. Stage all five folds.
+  4. Run the pilot, with its gate unchanged.
+  5. Train Teacher V1, only if the pilot says go.
+  6. Run `teacher_eval freeze`: Platt on calibrate, thresholds on threshold using the export.py release rule, written once.
+  7. Run `teacher_eval evaluate`: the validate fold under 8 simulated channels, plus a LibriSpeech dev genuine panel (20 per reader, 73 readers) and the MLAAD matched panel (250 per family, with M-AILABS genuine parents).
+  - Output: `runs/teacher-eval.json` with clips, readers, voices, false-alarm and detection rates per generator × channel, separability AUCs and an explicit unmeasured list (Hindi, genuine phone recordings, MeloTTS, sealed sets, student).
+- **Tests:** 65 pass.
+- **Next:** apply Codex's review fixes, then run on one GPU. The owner mounts Drive.
+
 ## Dataset acquisition research — 25 November 2026
 
 [Ranked candidates and dry-run commands](20_DATASET_CANDIDATES.md). LibriSeVoc offers six reconstructions per genuine parent but requires LibriSpeech ancestry clearance. The bounded CodecFake intake costs 0.487 GB. Indic-CodecFake is the closest Hindi design; full release access and per-fold Hindi reader counts remain unverified. Public download plans are offline in `pipeline_v3.fetch_candidates`. No transfer, generation or Colab session was started. English remains blocked at the failed audit.
