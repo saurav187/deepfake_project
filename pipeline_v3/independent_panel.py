@@ -160,6 +160,8 @@ def build(root, out, pairs_path):
         "genuine_speaker_overlap_calibration_evaluation": sorted(cal_s & ev_s),
         "genuine_speaker_overlap_evaluation_development": sorted(ev_s & {r["speaker"] for r in te if r["panel"] == "mlaad"}),
     }
+    per_original = Counter((r["split"], r["family"], r["parent"]) for r in rows if r["source"] == "mlaad")
+    checks["mlaad_originals_repeated_within_family"] = sum(v > 1 for v in per_original.values())
     # Teacher V1 pack texts (match.prompt keys) vs evaluation texts (v2l.text_key, same space).
     from .v2l import text_key as v1_key
 
@@ -313,6 +315,25 @@ def score(root, out, provenance, encoder, splits):
     todo = [r for r in rows if not (sdir / (hashlib.sha256(r["id"].encode()).hexdigest() + ".json")).exists()]
     print(f"score: {len(rows)} rows, {len(todo)} pending", flush=True)
     with torch.inference_mode():
+        # Reproduction check on 5 development clips: same models + view must give recorded scores.
+        with (root / TEACHER_CSV).open() as f:
+            ref = [r for r in csv.DictReader(f) if r["panel"] == "mlaad" and r["channel"] == "clean"
+                   and r["label"] == "1"][:5]
+        repro = []
+        for r in ref:
+            crop = treat((root / "development" / r["id"].removeprefix("mlaad/")).read_bytes())
+            x = channel(decode(crop), "clean")
+            pr = det.analyze_wave(x.astype(np.float32))["fake_probability"]
+            pt = float(expit(pa * mean_logit(teacher, model_view(x, {"pair": "phonemedf"}), device) + pb))
+            fb = json.loads((root / "v2/day-target-1/fallback-detector-v1/scores" /
+                             (hashlib.sha256(r["id"].encode()).hexdigest() + ".json")).read_text())
+            repro.append({"id": r["id"], "teacher": [pt, float(r["p"])],
+                          "release": [pr, fb["clean"]["paired"]["p"]]})
+        print("repro", json.dumps(repro), flush=True)
+        if any(abs(v["teacher"][0] - v["teacher"][1]) > 2e-3 or abs(v["release"][0] - v["release"][1]) > 2e-3
+               for v in repro):
+            raise ValueError("Scores do not reproduce the recorded development scores")
+        (out / f"repro-{'-'.join(splits)}.json").write_text(json.dumps(repro, indent=1))
         for i, r in enumerate(todo, 1):
             raw, overlap = None, None
             if r["source"] == "mlaad":
