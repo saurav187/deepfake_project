@@ -113,6 +113,24 @@ The cutoff was applied unchanged to the MLAAD dev panel:
   normaliser. It is **not** a pass. It misses the 15% limit by 3 clips, and the confidence
   interval spans both sides of the limit.
 
+### Secondary channels (descriptive, dev panel, the same frozen clean cutoff)
+
+The libri-dev calibration genuine is clean only, so these rows show how the clean cutoff
+behaves under simulated channels. They are not a channel-specific operating point.
+
+| Channel | Model | Genuine FA | Chatterbox | ElevenLabs-v3 | FishTTS | Gemini |
+|---|---|---|---|---|---|---|
+| Opus | combo | 193/697 (27.7%) | 149/166 | 152/181 | 170/173 | 150/181 |
+| Opus | release | 167/697 (24.0%) | 156/166 | 112/181 | 173/173 | 104/181 |
+| Opus | teacher | 171/697 (24.5%) | 35/166 | 95/181 | 33/173 | 116/181 |
+| Phone | combo | 183/697 (26.3%) | 145/166 | 159/181 | 170/173 | 167/181 |
+| Phone | release | 178/697 (25.5%) | 153/166 | 123/181 | 173/173 | 120/181 |
+| Phone | teacher | 117/697 (16.8%) | 41/166 | 112/181 | 31/173 | 146/181 |
+
+Codec and phone simulation raise genuine scores for both models. A clean-calibrated cutoff
+therefore does not hold 15% on these channels, and those channels would need genuine
+calibration audio of their own. Real calls remain unmeasured.
+
 ## 4. Independent evaluation
 
 The cutoff and candidate were frozen before any independent evaluation scoring. The full spec

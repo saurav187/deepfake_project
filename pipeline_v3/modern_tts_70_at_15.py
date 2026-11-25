@@ -322,16 +322,19 @@ def main():
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--out", type=Path)
     p.add_argument("--view", default="paired", choices=["paired", "full"])
+    p.add_argument("--channel", default="clean", choices=["clean", "opus", "phone"],
+                   help="MLAAD channel (secondary); libri-dev calibration genuine is always clean")
     a = p.parse_args()
     out = a.out or a.data / "v2/modern-tts-70-at-15"
     out.mkdir(parents=True, exist_ok=True)
-    rows = load(a.data, view=a.view)
+    rows = load(a.data, channel=a.channel, view=a.view)
+    suffix = "" if a.channel == "clean" else f"-{a.channel}"
     prov = {
         "teacher_csv_sha256": sha(a.data / TEACHER_CSV),
         "fallback_result_sha256": sha(a.data / FALLBACK / "result.json"),
         "fallback_inputs_sha256": sha(a.data / FALLBACK / "inputs.json"),
         "fallback_view": a.view,
-        "channel": "clean",
+        "channel": a.channel,
         "rows": dict(Counter(r["family"] for r in rows)),
         "readers": dict(Counter(r["reader"] for r in rows)),
     }
@@ -341,7 +344,7 @@ def main():
         prov["frozen_candidate_sha256"] = sha(a.frozen)
         res = {"provenance": prov,
                **offpanel(rows, libri_genuine(a.data, a.libri_release), json.loads(a.frozen.read_text()))}
-        path = out / f"offpanel-{a.view}.json"
+        path = out / f"offpanel-{a.view}{suffix}.json"
         path.write_text(json.dumps(res, indent=2) + "\n")
         print(f"wrote {path}")
         return 0
