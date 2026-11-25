@@ -11,6 +11,11 @@ def bound_audit(work, index):
     from .audit import require_passing
 
     report = json.loads((work / "audit.json").read_text())
+    if work.name == "v2l-lsv-norm-1" or report.get("version") == "v2l-lsv-norm-1":
+        from .v2l import verify_published as verify_v2l
+
+        verify_v2l(work, report, index)
+        return report
     if work.name == "v2a-norm-1" or report.get("version") == "v2a-norm-1":
         from .v2a import verify_published
 

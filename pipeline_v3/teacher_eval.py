@@ -320,7 +320,7 @@ def evaluate(cfg):
     if not val:
         raise ValueError("No eligible validation clips were scored")
     result = {
-        "kind": "EXPLORATORY Teacher V1 baseline evaluation" if frozen.get("exception") else ("Teacher V2-A evaluation" if audit.get("version") == "v2a-norm-1" else "Teacher V1 evaluation"),
+        "kind": "EXPLORATORY Teacher V1 baseline evaluation" if frozen.get("exception") else ({"v2a-norm-1": "Teacher V2-A evaluation", "v2l-lsv-norm-1": "Teacher V2-L (LibriSeVoc-only) evaluation"}.get(audit.get("version"), "Teacher V1 evaluation")),
         "exception": frozen.get("exception"),
         "frozen": frozen,
         "validate_by_generator_channel": summarise(val, lambda x: (x["generator"], x["channel"])),

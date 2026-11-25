@@ -379,20 +379,34 @@ def prepare(root, work, scratch):
     dev = scratch / "development"
     (dev / "audio").mkdir(parents=True)
 
-    def store(r, raw):
-        b = treated(raw)
+    # Treated clips come from the shared, versioned clip cache (clip_cache.py); a resumed
+    # run skips every clip already cached. V2-A keeps its own splits, audit and pack.
+    from .clip_cache import ClipCache
+
+    cache = ClipCache(root)
+    workers = max(1, min(8, (os.cpu_count() or 2) - 1))
+    cache.ensure_zip(
+        LSV,
+        root / "development/librisevoc/LibriSeVoc.zip",
+        [(r["member"], r["member"]) for r in rows if r["source"] == LSV],
+        scratch,
+        workers,
+    )
+    wanted = {
+        r["member"]: r
+        for r in rows
+        if r["source"] == ASV and (ASV, r["member"]) not in cache
+    }
+    if wanted:
+        cache.ensure_stream(
+            ASV, ((uid, uid, raw) for uid, raw in asv_audio(root, wanted)), scratch, workers
+        )
+    for r in rows:
+        b = cache.get(r["source"], r["member"])
         if b is not None:
             (dev / r["path"]).write_bytes(b)
             r["sha256"] = hashlib.sha256(b).hexdigest()
             features[r["id"]] = descriptors(b)
-
-    with zipfile.ZipFile(root / "development/librisevoc/LibriSeVoc.zip") as z:
-        for r in rows:
-            if r["source"] == LSV:
-                store(r, z.read(r["member"]))
-    wanted = {r["member"]: r for r in rows if r["source"] == ASV}
-    for uid, raw in asv_audio(root, wanted):
-        store(wanted[uid], raw)
     rows = balance([r for r in rows if r["id"] in features])
     data.check(rows)
     for split in ("train", "select"):

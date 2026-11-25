@@ -73,10 +73,15 @@ def main():
     p.add_argument("--libritts-text", type=Path, required=True)
     p.add_argument("--archive-md5", required=True)
     p.add_argument("--asv-table", type=Path)
+    p.add_argument("--work", default="v2a-norm-1", help="experiment dir under $D/v2 (v2l-lsv-norm-1 for V2-L)")
+    p.add_argument("--requests", type=Path, help="lineage-requests.csv (default: in --work)")
     a = p.parse_args()
-    work = a.data / "v2" / "v2a-norm-1"
-    with (work / "lineage-requests.csv").open() as f:
+    work = a.data / "v2" / a.work
+    work.mkdir(parents=True, exist_ok=True)
+    with (a.requests or work / "lineage-requests.csv").open() as f:
         requests = list(csv.DictReader(f))
+    if a.work.startswith("v2l"):
+        requests = [r for r in requests if r["source"] == "librisevoc"]
     out, missing = resolve(requests, a.libritts_text, a.archive_md5, a.asv_table)
     requested = Counter(r["source"] for r in requests)
     admitted = Counter(r["source"] for r in out)
