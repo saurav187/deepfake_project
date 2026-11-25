@@ -30,7 +30,11 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--offpanel", type=Path,
+                   help="offpanel-paired.json: freeze the libri-dev genuine 15%% cutoff")
     a = p.parse_args()
+    if a.offpanel:
+        return freeze_cutoff(a)
     rows = load(a.data)
     gen = [r for r in rows if r["label"] == 0]
     stats = {}
@@ -57,6 +61,28 @@ def main():
     a.out.mkdir(parents=True, exist_ok=True)
     (a.out / "frozen-candidate.json").write_text(json.dumps(frozen, indent=2) + "\n")
     print(json.dumps(frozen, indent=2))
+
+
+def freeze_cutoff(a):
+    """Second freeze: cutoff from libri-dev genuine only (no fakes), before independent eval."""
+    d = json.loads(a.offpanel.read_text())
+    f = json.loads((a.out / "frozen-candidate.json").read_text())
+    f["frozen_candidate_sha256"] = sha(a.out / "frozen-candidate.json")
+    f["cutoff"] = d["combined_zmean"]["cutoff_from_libri_15"]
+    f["cutoff_rule"] = (
+        "lowest cutoff with <= floor(0.15*841)=126 of the 841 libri-dev genuine clips "
+        "(73 LibriSpeech dev-clean/dev-other speakers) flagged; flag if score >= cutoff"
+    )
+    f["cutoff_calibration_flagged"] = f"{d['combined_zmean']['libri_flagged']}/{d['libri_genuine']}"
+    f["single_model_baselines_same_rule"] = {
+        m: {"cutoff_p": d[m]["cutoff_from_libri_15"], "libri_flagged": d[m]["libri_flagged"]}
+        for m in ("release", "teacher")
+    }
+    f["libri_release_sha256"] = d["provenance"]["libri_release_sha256"]
+    f["frozen_before"] = "any independent-panel-1 evaluation scoring (2026-11-26 ~02:00 IST)"
+    (a.out / "frozen-candidate-cutoff.json").write_text(json.dumps(f, indent=2) + "\n")
+    print(json.dumps(f, indent=2))
+    return 0
 
 
 if __name__ == "__main__":
