@@ -47,7 +47,39 @@
   - **False alarms:** the primary's genuine FA on outside data is 1.9% clean but **exceeds 2%** on simulated Opus (2.3%) and phone (2.2%). So even its realised operating point misses the strict budget on two channels.
   - **Compared with teacher V1:** the primary catches more Chatterbox and Fish, catches about as many ElevenLabs, and catches far fewer Gemini. It also raises false alarms roughly 4×.
   - **Reading:** the frozen-feature heads separate PhonemeDF XTTS/Chatterbox perfectly (select AUC 1.0) but do not transfer to the MLAAD generators. This is consistent with the known PhonemeDF bandwidth shortcut.
-- **Fallback started** 00:30:45 IST: frozen release v1 on the same trials (see below).
+- **Fallback result:** frozen released three-head detector v1. Exit 0, 00:30:45–01:27:40 IST (57 min), sole writer of `v2/day-target-1/fallback-detector-v1/`.
+  - **Records:** `result.json` sha256 `446ec99a…df34`, `inputs.json` `ebec2ef2…a13c`.
+  - **Integrity checks passed before scoring:**
+    - XLS-R files on Drive `models/xlsr` match the local training copy (config `0bffa0d0…`, preprocessor `a2254a5b…`, weights `d5e49057…`).
+    - `release.json` = `bdb7748c…`. Heads s42/s43/s44 = `e0ade0e6…` / `97c6ce44…` / `a2b2ed57…`.
+    - The provenance file is bound to the release's audit manifest `6680a620…`.
+  - **Overlap:**
+    - Exact decoded-PCM matches against the release's 138,180 train and dev hashes: **0 recordings**.
+    - Recordings with under 1 s of speech: **0**.
+    - Coverage is identical to day-target-1: 1,398 recordings × 3 channels = 4,194 (id, channel) trials.
+  - **Cutoff:** release v1, likely_fake at p ≥ 0.5623. It was frozen at a 5% false-alarm and 5% miss dev budget, not refitted to 2%.
+
+  **Paired view (same 4 s crop + norm + channel as the candidates): strict target NOT met.**
+
+  | Channel | Genuine FA | Chatterbox | ElevenLabs-v3 | FishTTS | Gemini-3.1-Flash |
+  |---|---|---|---|---|---|
+  | **clean** | **1/697 (0.1%)** | **67/166 (40.4%)** | **11/181 (6.1%)** | **155/173 (89.6%)** ✔ | **13/181 (7.2%)** |
+  | opus (sim.) | 7/697 (1.0%) | 64/166 (38.6%) | 18/181 (9.9%) | 156/173 (90.2%) ✔ | 14/181 (7.7%) |
+  | phone (sim.) | 7/697 (1.0%) | 67/166 (40.4%) | 21/181 (11.6%) | 156/173 (90.2%) ✔ | 20/181 (11.0%) |
+
+  **Full-recording view (the detector's own use; descriptive):**
+  - **Genuine FA:** 0/697 on all three channels.
+  - **Chatterbox:** 36.7–40.4%.
+  - **ElevenLabs-v3:** 4.4–9.4%.
+  - **FishTTS:** 97.7–98.8%.
+  - **Gemini:** 2.2–3.9%.
+
+  - **Reading:** release v1 is the best of the four models on this panel. It is the only one that meets the target for any generator: FishTTS, in all three channels. It also keeps false alarms at or below 1.0%. Chatterbox reaches about 40%. ElevenLabs-v3 and Gemini-3.1-Flash remain largely undetected, at 6–12%, by every model tested.
+  - **Caveats:**
+    - The panel has 3 genuine readers, and reader overlap with ASVspoof 5 cannot be verified.
+    - This panel was inspected before this run.
+    - Independent confirmation is unmeasured.
+    - Real calls are unmeasured.
 - **Fallback prepared** (`pipeline_v3/day_fallback.py`, CPU smoke test passed):
   - **Model:** the released three-head detector v1, frozen. Release `bdb7748c`, XLS-R 300M, heads with seeds 42/43/44, threshold p ≥ 0.5623. That threshold was set on dev for a 5% false-alarm and 5% miss budget, not 2%.
   - **Trials:** the same (id, channel) trials as `day_target evaluate`.
