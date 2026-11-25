@@ -80,6 +80,21 @@
     - This panel was inspected before this run.
     - Independent confirmation is unmeasured.
     - Real calls are unmeasured.
+- **Independent recount (01:35 IST):** both the primary and fallback tables were recomputed straight from the per-recording score files and `teacher-eval-clips.csv` labels, outside `day_target.table`. All 15 cells in each table reproduce exactly (4,194 trials, 1,398 recordings).
+- **Time and CU:**
+  - **Elapsed:** chain 23:33:41–00:29:48 IST (56 min: baseline 2 s, fit 29 min, evaluate 27 min). Fallback 00:30:45–01:27:40 IST (57 min).
+  - **Balance:** 151.43 CU (23:32 IST) → 148.83 CU (01:28 IST), so 2.60 CU for the account. That includes the separate `intake-cpu` session from about 23:55 IST.
+  - **This run's T4 share:** about 1.24 CU/h × 1.9 h ≈ 2.4 CU.
+- **Failed attempts:** none in the chain or the fallback. One observer poll failed on a local network error (23:44 IST).
+- **Checkpoints:**
+  - `v2/day-target-1/`: `protocol.json`, `frozen.json` `7fd02ac1…`, `comparison-inputs.json`, `scores/` (1,398), `result.json` `7b3bee4f…`, phase logs.
+  - `fallback-detector-v1/`: `inputs.json` `ebec2ef2…`, `scores/` (1,398), `result.json` `446ec99a…`, `fallback.log`.
+  - V1 pack, pilot and thresholds and the V2-L checkpoint are untouched.
+- **Session:** `v3-t4p` is still up and owned by "Project progress analysis", which is integrating the result under `college/25_CODEX_ONE_DAY_CONTINUATION.md`.
+- **Remaining blockers:**
+  - Independent panel and real calls: unmeasured.
+  - Bounded training comparison: no separately audited broader training subset is ready yet. The modern-data intake has staged nothing for training.
+  - ElevenLabs-v3 and Gemini-3.1-Flash need training data from modern generators. No threshold change on the existing models can reach 80% at ≤2% FA.
 - **Fallback prepared** (`pipeline_v3/day_fallback.py`, CPU smoke test passed):
   - **Model:** the released three-head detector v1, frozen. Release `bdb7748c`, XLS-R 300M, heads with seeds 42/43/44, threshold p ≥ 0.5623. That threshold was set on dev for a 5% false-alarm and 5% miss budget, not 2%.
   - **Trials:** the same (id, channel) trials as `day_target evaluate`.
