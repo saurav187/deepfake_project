@@ -11,6 +11,11 @@ def bound_audit(work, index):
     from .audit import require_passing
 
     report = json.loads((work / "audit.json").read_text())
+    if work.name == "v2a-norm-1" or report.get("version") == "v2a-norm-1":
+        from .v2a import verify_published
+
+        verify_published(work, report, index)
+        return report
     if report.get("pass") or "exception" not in report:
         require_passing(report, digest(index))
     else:

@@ -1,5 +1,9 @@
 # Pipeline v3 handoff for Claude
 
+## Current V2-A handoff
+
+Use the [V2-A Claude handoff](22_V2A_CLAUDE_HANDOFF.md) for the five-generator baseline, fresh A08 confirmation, metadata joins, formal audit, GPU command and V1 comparison.
+
 ## Final local review of the exploratory Teacher V1 runner
 
 Deploy the reviewed branch including the commit titled **Bind exploratory teacher checkpoints, freeze and resume to the approved run**. The original failed audit remains the baseline's provenance. No Colab job was started during review. The full pipeline suite passed 70 tests (five warnings), and Bash syntax validation passed.

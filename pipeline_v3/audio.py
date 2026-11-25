@@ -153,7 +153,7 @@ def fixed_crop(data):
 
 
 def model_view(x, row):
-    if row["pair"] == "phonemedf":
+    if row["pair"] == "phonemedf" or row.get("prepared_view") == "v2a-fixed-norm":
         if len(x) < WINDOW:
             return x[:0]
         y = x[:WINDOW]
