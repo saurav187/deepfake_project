@@ -5,7 +5,30 @@
 
 *Live section. MEASURED = observed on Colab/Drive. Start 08:18 IST (02:48 UTC).*
 
-**State (03:50 UTC / 09:20 IST):** last completed stage **ECAPA rule frozen**. Full ECAPA embedding (XTTS-v2 + Chatterbox) and WavLM completion are running on the T4. The English chain (`/content/en_chain.sh` on `v3-gpu`) waits for them, then runs label → match → audit → catalog → pack → stage → pilot. Teacher V1 has not started; student work is deferred.
+**State (04:20 UTC / 09:50 IST): STOPPED at English match. Failed gate: `stage0.viable()`, "Missing English generator cell in train". Train has XTTS-v2 but no MeloTTS.** Last completed stage: **ECAPA voice labels (full)**. Audit, catalog, pack, pilot and Teacher V1 were **not run**. No threshold was changed. Student deferred. The T4 is released once the ECAPA MeloTTS embeddings (cached for the owner's decision) are on Drive.
+
+**Why train has no MeloTTS (MEASURED):** the Melo built-in-voice cohort rule (`voice_labels.py`) only clusters clips whose max WavLM cosine to every VCTK reference is < 0.65, needs ≥ 50 such clips, then requires cluster cosine ≥ 0.88. Under WavLM-SV the Melo max-reference cosine has p1 0.682, p5 0.705, median 0.837, p95 0.95. Only **0.05% (≈15 clips) fall below 0.65**, so no clustering runs and **all 28,539 Melo labels are `unknown`**. This is the same WavLM score-scale problem as the 0.86 floor, now in the cohort constants (0.65 / 0.80 / 0.88). The owner approved an ECAPA rule for *VCTK target* acceptance only and said to keep WavLM's Melo results, so I did not invent an ECAPA cohort rule.
+
+**English match under the frozen ECAPA rule (MEASURED, counts are [clips, readers, inferred target voices]):**
+
+| Fold | genuine | XTTS-v2 | Chatterbox (held out) |
+|---|---|---|---|
+| train | 2,282 / 126 | 2,282 / 126 / 4 (p243, p258, p259, p273; p230 absent) | 0 (held out) |
+| select | 1,338 / 44 | 657 / 44 / 2 (p228, p233) | 843 / 44 / 2 |
+| calibrate | 615 / 33 | 333 / 33 / 1 (p236) | 333 / 33 / 1 |
+| threshold | 359 / 19 | 196 / 19 / 1 (p244) | 203 / 19 / 1 |
+| validate | 559 / 29 | 300 / 29 / 1 (p254) | 313 / 29 / 1 |
+
+Every reader and voice minimum holds. The only failing cell is MeloTTS in train. ECAPA acceptance (whole corpus): XTTS-v2 15,924/28,539 (55.8%; strict 0.69 floor 30.2%); Chatterbox 23,329/28,539 (81.7%; strict 64.7%). Details: `MyDrive/audio-v3/stage0-ecapa/label-report-full.json`, `voices.csv`; failing match log `MyDrive/audio-v3/stage0-en-ecapa/match-FAILED.log`.
+
+**Owner decision needed (pick one, then resume):**
+- (a) Approve an **ECAPA Melo cohort rule** defined like the target rule, from reference trials: a Melo clip joins the train-only cohort only if the frozen ECAPA rule assigns it **no** VCTK voice (both windows below floor 0.64 or margin < 0.08), with cluster constants re-derived on ECAPA scale. The ECAPA Melo embeddings are already cached, so this is about 5 min of CPU plus the chain (~30–60 min including the pilot).
+- (b) Approve an XTTS-only train cell (changes the `viable()` generator requirement).
+- (c) Keep as is: English pilot blocked.
+
+**Errors fixed during the run (not gates):**
+1. Twice, the WavLM writer died with `sqlite3.OperationalError: database is locked`. Causes: read-only status queries, then my own 5-min online backup holding a read lock past the 5 s busy timeout. Resumed from the last commit each time (no restart from zero). The concurrent backup was removed and runs once at the end.
+2. `safe_path` rejected Drive symlinks for the base selection and `inventory.jsonl`. Replaced them with byte-checked local copies.
 
 **Sessions:** `v3-gpu` (T4, created 02:50 UTC; displayed rate 1.32 CU/h including the CPU session). `v3-data` (CPU) is idle apart from checks. The CPU voice writer was **stopped** at a commit at 03:04:23 UTC (6,436 XTTSv2 + 10 references, `integrity_check` ok, sha256 `03c5c8d8…`). The checkpoint was copied byte-identically to the T4 (`/content/w/stage0/sv.sqlite`), with one writer only. Backups to `MyDrive/audio-v3/stage0/sv.sqlite` every 5 min. Overnight watchdog stopped.
 
