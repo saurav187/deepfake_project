@@ -16,6 +16,8 @@
   - Fit is limited by Drive I/O. It reads the 5,000 cached WavLM `.npz` files one at a time, at 1.4% CPU and 0% GPU. Its log stayed empty because tee had not yet flushed to Drive.
   - At 23:50 IST the writer started a **read-only** cache warm (`xargs -P16 cat > /dev/null` over those files, log `/content/warm.log`). It writes nothing.
   - 23:44 IST: one observer poll failed on a local network error. No effect on the run.
+- **Pilot replay passed** (about 23:50 IST): fit got past the EER reproduction check against `pilot.json` and loaded WavLM for the calibrate and threshold cutoffs.
+- **23:55 IST, parallel job:** "modern-data intake" (`college/24_MODERN_DATA_INTAKE.md` @`95daceb`) is the sole writer of `development/modern-intake/`. It runs on its own CPU session `intake-cpu` and does not touch `v3-t4p`, `day-target-1`, the clip cache, V1 or V2-L. It has been asked to keep Drive I/O moderate until evaluate ends. Before any broader-data manifest enters this run it needs a separate audit, verified labels, overlap checks against the V1 held-out readers and the MLAAD panel readers, A08 excluded, no sealed data, and per-reader counts, plus explicit agreement.
 - **Fallback prepared** (`pipeline_v3/day_fallback.py`, CPU smoke test passed):
   - **Model:** the released three-head detector v1, frozen. Release `bdb7748c`, XLS-R 300M, heads with seeds 42/43/44, threshold p ≥ 0.5623. That threshold was set on dev for a 5% false-alarm and 5% miss budget, not 2%.
   - **Trials:** the same (id, channel) trials as `day_target evaluate`.
