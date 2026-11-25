@@ -1,5 +1,17 @@
 # Pipeline v3 handoff for Claude
 
+## STOPPED for the night, 26 Nov 2026, 02:07 IST (owner instruction)
+
+- **Sessions:** all Colab sessions were released (v3-t4p, intake-cpu). Balance 148.06 CU, usage 0 CU/h.
+- **Not yet on Drive:** intake closed list `closed-20261125T203019Z` (60 files) is sha256-verified **only on the workstation**, at `~/relay-intake/r2/v1/` (+ `closed.sha256`, `trim-rvcbench.jsonl`). It covers SpeechFake shards 000029–000049, AMI 000050–000051, SCDF 000052–000055 and the pairs/lineage/panel files, including rvcbench/pairs.jsonl (81cc468c…).
+  - **First task tomorrow:** publish these into `development/modern-intake/v1/` through a mounted VM. Upload in 10 MB parts, verify in a tmp folder, then move; never overwrite.
+- **Lost with intake-cpu:** the SpeechFake trim measurement (trim_report.json was never written) and the in-progress 5-fold diagnostic. Both must be rerun.
+- **Results on Drive:**
+  - `v2/day-target-1/`: probe, fallback, fa15 and modern-tts-70 files.
+  - `v2/modern-tts-70-at-15/`: frozen combination, cutoff 0.69257 set on libri-dev.
+    - On the MLAAD dev panel: Chatterbox 144/166, EL 141/181, Fish 171/173, Gemini 150/181 at 107/697 false alarms. That's development evidence, not independent.
+- **Pending:** the independent-panel-1 evaluation (session 435e59bf), which needs pairs.jsonl on Drive and a T4 window. V2-L is still paused at its verified cache checkpoint, 1,040 clips.
+
 ## Status 25 Nov 2026, 23:06 IST (Claude)
 
 **Sessions:**
