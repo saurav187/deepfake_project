@@ -85,10 +85,15 @@ def audit(local):
     return panels(rows, features)
 
 
-def panels(rows, features):
+def panels(rows, features, languages=("en", "hi")):
+    """Audit every configured language; rows from any other language fail closed."""
+    languages = tuple(languages)
+    if not languages or {r["language"] for r in rows} - set(languages):
+        raise ValueError("Audit rows contain an unconfigured language")
     result = fit_controls(rows, features)
     result["languages"] = {}
-    for lang in ("en", "hi"):
+    result["languages_audited"] = sorted(languages)
+    for lang in languages:
         idx = [i for i, r in enumerate(rows) if r["language"] == lang]
         panel = [rows[i] for i in idx]
         if {(r["split"], r["label"]) for r in panel} != {

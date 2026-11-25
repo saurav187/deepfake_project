@@ -46,7 +46,7 @@ def viable(rows):
             raise ValueError("Missing English generator cell in " + fold)
 
 
-def audit_selection(root, work):
+def audit_selection(root, work, languages=("en", "hi")):
     rows = read(work / "selection.csv")
     hashes = {}
     features = {}
@@ -65,7 +65,7 @@ def audit_selection(root, work):
     kept = [dict(r, sha256=hashes[r["id"]]) for r in available if r["parent"] in joined]
     viable(kept)
     idx = [r for r in kept if r["id"] in features]
-    report = panels(idx, [features[r["id"]] for r in idx])
+    report = panels(idx, [features[r["id"]] for r in idx], languages)
     report.update(
         selection_sha256=digest(work / "selection.csv"),
         dropped=len(rows) - len(kept),
@@ -80,10 +80,11 @@ def audit_selection(root, work):
         raise ValueError(f"Nuisance gate failed; see {work / 'prep-audit.json'}")
 
 
-def catalog(root, work):
+def catalog(root, work, languages=("en", "hi")):
     report = json.loads((work / "prep-audit.json").read_text())
     if (
         report.get("policy") != POLICY
+        or report.get("languages_audited") != sorted(languages)
         or not report["pass"]
         or digest(work / "eligible.csv") != report["eligible_sha256"]
         or digest(work / "selection.csv") != report["selection_sha256"]
@@ -134,9 +135,21 @@ def main():
     p.add_argument("--release", action="store_true")
     p.add_argument("--addons", action="store_true")
     p.add_argument("--microsoft", choices=["azure", "edge"], default="azure")
+    p.add_argument(
+        "--languages",
+        nargs="+",
+        choices=["en", "hi"],
+        default=["en", "hi"],
+        help="'--languages en' is the English-only path; its products live in <stage>-en/",
+    )
     a = p.parse_args()
+    languages = sorted(set(a.languages))
     root = a.data / "development"
     work = a.data / ("stage5" if a.release else "stage3" if a.addons else "stage0")
+    if languages == ["en"]:
+        work = work.with_name(work.name + "-en")
+    elif languages != ["en", "hi"]:
+        raise SystemExit("Hindi-only runs are not supported; English is always required")
     if a.action == "proof":
         rows = inventory(None, a.listings, a.real_texts, a.real_glob)
         proof(rows, [r for r in read(Path(a.base)) if r["language"] == "hi"])
@@ -148,8 +161,8 @@ def main():
     elif a.action in {"match", "jobs"}:
         rows = read(shared / "inventory.csv")
         base = read(safe_path(root, a.base))
-        hindi = [r for r in base if r["language"] == "hi"]
-        if a.release and not any(
+        hindi = [r for r in base if r["language"] == "hi" and "hi" in languages]
+        if a.release and "hi" in languages and not any(
             r["split"] == "train" and r["generator"] == "freevc24" for r in hindi
         ):
             raise ValueError(
@@ -180,15 +193,16 @@ def main():
         if diag:
             write_csv(work / "mlaad-diagnostic.csv", diag)
     elif a.action == "audit":
-        audit_selection(root, work)
+        audit_selection(root, work, languages)
     elif a.action == "catalog":
-        catalog(root, work)
+        catalog(root, work, languages)
     else:
         report = json.loads((work / "prep-audit.json").read_text())
         rows = read(work / "catalog.csv")
         eligible = read(work / "eligible.csv")
         if (
             report.get("policy") != POLICY
+            or report.get("languages_audited") != languages
             or not report["pass"]
             or digest(work / "eligible.csv") != report["eligible_sha256"]
             or digest(work / "selection.csv") != report["selection_sha256"]

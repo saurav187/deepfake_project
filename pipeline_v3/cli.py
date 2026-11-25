@@ -46,6 +46,10 @@ def main():
     p.add_argument("--per-class", type=int, default=1000)
     p.add_argument("--threads", type=int, default=2)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument(
+        "--languages", nargs="+", choices=["en", "hi"], default=["en", "hi"],
+        help="pilot languages; must equal the languages the bound audit covered",
+    )
     cfg = p.parse_args()
     cfg.packed = cfg.packed or cfg.data / "packed"
     cfg.release = cfg.release or cfg.data / "release-v3"
@@ -112,6 +116,9 @@ def main():
 
         audit_report = json.loads((cfg.data / "audit.json").read_text())
         require_passing(audit_report, digest(cfg.local / "index.json"))
+        cfg.languages = sorted(set(cfg.languages))
+        if audit_report.get("languages_audited", ["en", "hi"]) != cfg.languages:
+            raise ValueError("Pilot languages differ from the audited languages")
         pilot(cfg)
     elif cfg.action in {"teacher", "student"}:
         from .audit import require_passing

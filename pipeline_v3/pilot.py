@@ -83,6 +83,7 @@ def cache(cfg, rows, encoder, tag):
 
 def pilot(cfg):
     rng = np.random.default_rng(cfg.seed)
+    languages = tuple(getattr(cfg, "languages", ("en", "hi")))
     allrows = entries(cfg.local, {"train", "select"})
     # Replay the family holdout on a final pack that also contains training Gemini.
     # This restriction applies to feature probes only. The teacher uses the full pack.
@@ -101,7 +102,7 @@ def pilot(cfg):
                 # Sample real parents and their fakes together for language-specific EER.
                 if label == "0":
                     continue
-                for lang in ("en", "hi"):
+                for lang in languages:
                     controls = {
                         r["parent"]: r
                         for r in allrows
@@ -130,7 +131,7 @@ def pilot(cfg):
                         rows.extend((controls[parent], fake))
             else:
                 first = len(rows)
-                for lang in ("en", "hi"):
+                for lang in languages:
                     group = [r for r in pool if r["language"] == lang]
                     rows.extend(
                         group[i] for i in rng.permutation(len(group))[: limit // 2]
@@ -141,6 +142,7 @@ def pilot(cfg):
                     rest[i] for i in rng.permutation(len(rest))[: limit - len(used)]
                 )
     report = {
+        "languages": list(languages),
         "probe_holdout": sorted(holdout),
         "selected": dict(Counter(r["split"] for r in rows)),
         "models": {},
@@ -217,7 +219,7 @@ def pilot(cfg):
         coverage = result["eligible"] / result["selected"]
         languages = [
             result["slices"].get("language/" + lang + "/unseen", {}).get("eer")
-            for lang in ("hi", "en")
+            for lang in languages
         ]
         decisions[name] = (
             min(
