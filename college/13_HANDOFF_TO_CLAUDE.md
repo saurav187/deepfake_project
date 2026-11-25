@@ -1,5 +1,49 @@
 # Pipeline v3 handoff for Claude
 
+<!-- ENGLISH-PILOT-RUN:START -->
+## English pilot run — 25 Nov 2026 (Claude, unattended; owner approvals 08:18, ~09:00, ~09:10 IST)
+
+*Live section. MEASURED = observed on Colab/Drive. Start 08:18 IST (02:48 UTC).*
+
+**State (03:50 UTC / 09:20 IST):** last completed stage **ECAPA rule frozen**. Full ECAPA embedding (XTTS-v2 + Chatterbox) and WavLM completion are running on the T4. The English chain (`/content/en_chain.sh` on `v3-gpu`) waits for them, then runs label → match → audit → catalog → pack → stage → pilot. Teacher V1 has not started; student work is deferred.
+
+**Sessions:** `v3-gpu` (T4, created 02:50 UTC; displayed rate 1.32 CU/h including the CPU session). `v3-data` (CPU) is idle apart from checks. The CPU voice writer was **stopped** at a commit at 03:04:23 UTC (6,436 XTTSv2 + 10 references, `integrity_check` ok, sha256 `03c5c8d8…`). The checkpoint was copied byte-identically to the T4 (`/content/w/stage0/sv.sqlite`), with one writer only. Backups to `MyDrive/audio-v3/stage0/sv.sqlite` every 5 min. Overnight watchdog stopped.
+
+**GPU local tree** `/content/w` on `v3-gpu`: PhonemeDF archives staged locally and md5-verified against Zenodo `files.tsv`. Other `development/*` entries and `models` are symlinks to Drive. `stage0/inventory.csv` is a byte copy (sha256 `97cf0396…`).
+
+**WavLM voices (MEASURED): collapse.** GPU end-to-end ~33 clips/s. On 19,773 XTTS-v2 clips, 92.5% were unknown and accepted labels were almost all p236. Train had 6 clips from 5 readers. Cause: reference cosines of up to 0.959 between *different* VCTK references under WavLM-SV (same reference, two views 0.93–0.98), so a margin of ≥0.08 is unreachable. Kept for the record; MeloTTS built-in cohort labels still come from WavLM (`stage0/voices.csv`).
+
+**ECAPA (`speechbrain/spkrec-ecapa-voxceleb` rev `0f99f2d0…`, `MyDrive/audio-v3/models/ecapa-voxceleb`)**, separate cache `stage0-ecapa/sv-ecapa.sqlite`:
+- References: cross-reference cosine median 0.12, max 0.56 (p228–p244). Same reference, two views 0.66–0.80 (p230 0.35).
+- Sample (1 in 16 by hash, 1,767 + 1,767), measured 11.2–11.7 clips/s end-to-end while sharing the T4 with WavLM. Under the original 0.86 floor: **0 accepted** (best-score median 0.65 / 0.71).
+- **Frozen rule `ecapa-reference-floor-v1`** (`stage0-ecapa/rule.json`), set from known-identity reference trials *before* use on the corpus:
+  - Method: three non-overlapping thirds of each speech-active reference. One third enrolls all 10 references; the other two are the two query windows. 3 rotations give 30 trials, each against the correct reference plus 9 wrong ones, and again with the correct reference removed.
+  - Rule: both windows choose the same voice, margin ≥ 0.08, floor = **0.64** (smallest 0.01 step above the maximum wrong-reference window score, 0.631).
+  - Results: genuine accepted **30/30**; correct-removed false accepts **0/30**. Hardest pair p228–p244 (0.598 overall; worst window 0.631).
+  - Strict sensitivity floor 0.69 (report only, never used for tuning): genuine 28/30, 0 false accepts.
+  - Labels are **INFERRED**. Caveat: ten single recordings, and same-recording matching is easier than matching synthesized speech.
+- Early application (snapshot: 12,531 XTTS / 1,767 Chatterbox embedded): XTTS acceptance 55% (strict 30%); Chatterbox 81% (strict 64%). Every fold is filled under both floors (Chatterbox threshold fold has 5 readers at strict). Final counts follow from the full label step.
+
+**Hindi speech-density experiment (MEASURED, `MyDrive/audio-v3/stage0/hindi_density.json`, `pipeline_v3/hindi_density.py`):**
+- Caliper |Δ speech_ratio| ≤ δ within each matched pair, on the crop_norm view. δ = **0.08** was chosen on train only (train speech_ratio AUC 0.461), frozen, and applied once to select.
+- Before: 354 train / 425 select pairs. speech_ratio 0.724, joint 0.724: FAIL.
+- After: 200 train pairs (56%, 8 readers) / 170 select pairs (40%, **4 readers**, 155 XTTS + 15 FreeVC). All controls ≤ 0.60: speech_ratio 0.539, rolloff 0.579, tilt 0.569, edge 0.564, joint **0.597**.
+- **Hindi stays PENDING/BLOCKED for this pilot.** Select has 4 readers (< 5), the joint AUC sits at the gate, and the caliper is not implemented in the pack pipeline's own audit.
+
+**English inventory joins (MEASURED):** each system has 28,539 fakes, all with a real parent and a non-empty transcript. 251 PhonemeDF readers, 73 LibriSpeech dev readers, 0 overlap.
+
+**New code (local commits on `pipeline-v3-scratch`, not pushed):**
+- `ffb471d` English-only path (`--languages en`, products in `stage0-en*/`; the audit records `languages_audited`; pilot must match) + Hindi experiment
+- `cfdd9cb` `--subset` deterministic reader round-robin quotas (unused so far)
+- `0511b21`/`87de36c`/`3e152c9` ECAPA path, calibration, frozen-rule labelling (`stage0 --voices ecapa`, products in `stage0-en-ecapa/`)
+- 35 tests pass.
+
+**Inspect (no duplicates are started by these):**
+```bash
+colab --auth=oauth2 ssh -s v3-gpu -- 'tail -20 /content/en_chain.log; tail -2 /content/ecapa_full.log; tail -2 /content/voice.log'
+```
+<!-- ENGLISH-PILOT-RUN:END -->
+
 <!-- OVERNIGHT-STAGE1:START -->
 ## Overnight Stage 1 run — 25 Nov 2026 (Claude, unattended; owner approved Option A)
 
