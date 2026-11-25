@@ -4,7 +4,15 @@
 
 - **25 Nov 2026, 23:33 IST: acknowledged** by Claude. Owner of the run through 26 Nov 23:20 IST. Code `3906c8b` (89 local tests pass).
 - **Session:** existing T4 `v3-t4p` (1.24 CU/h), Drive mounted, GPU idle at start (0 MiB), no pipeline process running. Another `colab ssh` client holds the runtime's single SSH slot, so this run drives the VM via `colab exec` only and does not touch other directories. The A100 and V2-L stay as they are; V2-L checkpoint, V1 pack, pilot and thresholds are read-only for this run.
-- **Writer:** one, this job, only under `MyDrive/audio-v3/v2/day-target-1/`. Balance at start 151.43 CU.
+- **Writer (corrected 23:40 IST):** the interactive Claude session "Project progress analysis" had already launched the chain on `v3-t4p` at 23:33:41 IST (`/content/day_run.sh`, code `3906c8b` in `/content/day-src`, chain log `/content/day_run.log`, phase logs tee'd to `v2/day-target-1/<phase>.log`). Agreed by message: it is the **sole writer** of `v2/day-target-1` and the chain; this job observes read-only through `colab exec` and owns this section; neither releases `v3-t4p` without telling the other. Its VCC 2018 fix is held until evaluate finishes. No second chain was started (this job's unused source upload was removed). Balance at start 151.43 CU.
+- **Baseline** (exit 0, 23:33:41–23:33:43 IST, CPU): V1 teacher at its frozen upper threshold 0.907 on the previously inspected MLAAD panel (3 genuine M-AILABS readers). Target **not met**.
+
+  | Channel | Genuine FA | Chatterbox | ElevenLabs-v3 | FishTTS | Gemini-3.1-Flash |
+  |---|---|---|---|---|---|
+  | clean | 3/697 (0.43%) | 1/166 (0.6%) | 29/181 (16.0%) | 3/173 (1.7%) | 34/181 (18.8%) |
+  | opus (sim.) | 8/697 (1.15%) | 1/166 (0.6%) | 31/181 (17.1%) | 1/173 (0.6%) | 28/181 (15.5%) |
+  | phone (sim.) | 4/697 (0.57%) | 4/166 (2.4%) | 32/181 (17.7%) | 1/173 (0.6%) | 60/181 (33.1%) |
+- **Fit** started 23:33:43 IST.
 
 ## Status 25 Nov 2026, 23:06 IST (Claude)
 
