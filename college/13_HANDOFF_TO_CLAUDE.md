@@ -13,6 +13,14 @@
   | opus (sim.) | 8/697 (1.15%) | 1/166 (0.6%) | 31/181 (17.1%) | 1/173 (0.6%) | 28/181 (15.5%) |
   | phone (sim.) | 4/697 (0.57%) | 4/166 (2.4%) | 32/181 (17.7%) | 1/173 (0.6%) | 60/181 (33.1%) |
 - **Fit** started 23:33:43 IST.
+  - Fit is limited by Drive I/O. It reads the 5,000 cached WavLM `.npz` files one at a time, at 1.4% CPU and 0% GPU. Its log stayed empty because tee had not yet flushed to Drive.
+  - At 23:50 IST the writer started a **read-only** cache warm (`xargs -P16 cat > /dev/null` over those files, log `/content/warm.log`). It writes nothing.
+  - 23:44 IST: one observer poll failed on a local network error. No effect on the run.
+- **Fallback prepared** (`pipeline_v3/day_fallback.py`, CPU smoke test passed):
+  - **Model:** the released three-head detector v1, frozen. Release `bdb7748c`, XLS-R 300M, heads with seeds 42/43/44, threshold p ≥ 0.5623. That threshold was set on dev for a 5% false-alarm and 5% miss budget, not 2%.
+  - **Trials:** the same (id, channel) trials as `day_target evaluate`.
+  - **Provenance:** trained on ASVspoof 5 train (A01–A08, including A08) and IndieFake. Neither MLAAD nor M-AILABS is among its sources. MLAAD's four generators are not in its training attacks. Both ASVspoof 5 and M-AILABS come from LibriVox readers, so overlap of the 3 panel readers with ASVspoof 5 speakers **cannot be verified**, because ASVspoof 5 anonymises speakers.
+  - **Output:** `v2/day-target-1/fallback-detector-v1/`, pending the writer's agreement and the end of the chain.
 
 ## Status 25 Nov 2026, 23:06 IST (Claude)
 
