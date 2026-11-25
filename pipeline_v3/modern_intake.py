@@ -200,6 +200,14 @@ def librispeech_speakers(path):
     return out
 
 
+# All M-AILABS English readers (en_US + en_UK), a superset of the 3 MLAAD panel readers.
+MAILABS_EN_READERS = "elizabeth_klett,judy_bieber,mary_ann,elliot_miller"
+
+
+def norm_name(n):
+    return " ".join(n.replace("_", " ").lower().split())
+
+
 def upstream_role(corpus, speaker, libri):
     if corpus == "VCTK":
         if speaker in PHONEMEDF_REFS:
@@ -218,7 +226,7 @@ def lineage(a, log):
     rows = selected(load_meta(a.meta), {m for s in STAGES.values() for m in s})
     cache = IntakeCache(a.out)
     libri = librispeech_speakers(a.speakers)
-    panel = {n.strip().lower() for n in (a.panel_readers or "").split(",") if n.strip()}
+    panel = {norm_name(n) for n in (a.panel_readers or MAILABS_EN_READERS).split(",") if n.strip()}
     v1_readers = set(json.loads(Path(a.v1_readers).read_text())) if a.v1_readers else None
     out = Path(a.out) / "rvcbench"
     out.mkdir(parents=True, exist_ok=True)
@@ -237,7 +245,7 @@ def lineage(a, log):
             continue  # stage not fetched yet
         corpus, spk = r["source_dataset"], r["speaker_id"]
         role = upstream_role(corpus, spk, libri)
-        name = libri.get(spk, (None, None, ""))[2].lower() if corpus == "Libritts" else ""
+        name = norm_name(libri.get(spk, (None, None, ""))[2]) if corpus == "Libritts" else ""
         if v1_readers is not None and corpus == "Libritts" and f"librispeech/{spk}" in v1_readers:
             role = "reserved:V1_reader"
         if name and name in panel:
@@ -324,21 +332,26 @@ def diagnostic(a, log):
 
     out = Path(a.out) / "rvcbench"
     cache = IntakeCache(a.out)
-    pairs = [json.loads(x) for x in (out / "pairs.jsonl").read_text().splitlines()]
-    train = [p for p in pairs if p["use"] == "train_candidate" and p["pair_eligible"]]
-    # Balance per corpus x model: each pair contributes its fake and its (shared) genuine
-    # once per family; genuine reuse is capped at one use per family.
+    train = []
+    for src, sub, mk in (("rvcbench", "rvcbench", "model"), ("speechfake", "speechfake", "system")):
+        f = Path(a.out) / sub / "pairs.jsonl"
+        if f.exists():
+            for x in f.read_text().splitlines():
+                q = json.loads(x)
+                if q["use"] == "train_candidate" and q["pair_eligible"]:
+                    train.append((src, f"{src}|{q[mk]}", q))
+    # Balance: each fake with its genuine parent; a parent is reused at most once per family.
     items, seen = [], set()
-    for p in sorted(train, key=lambda p: p["fake"]):
-        fam = p["model"]
+    for src, fam, p in sorted(train, key=lambda t: t[2]["fake"]):
         if (fam, p["genuine"]) in seen:
             continue
         seen.add((fam, p["genuine"]))
-        items.append((fam, p["speaker"], "1", p["fake"]))
-        items.append((fam, p["speaker"], "0", p["genuine"]))
+        g = p.get("parent_speaker", p["speaker"])  # group = genuine parent speaker
+        items.append((fam, g, "1", (src, p["fake"])))
+        items.append((fam, g, "0", (src, p["genuine"])))
     ids = sorted({i[3] for i in items})
     with ProcessPoolExecutor(a.workers) as ex:
-        feats = dict(zip(ids, ex.map(_feat, [cache.get(SOURCE, i) for i in ids], chunksize=8)))
+        feats = dict(zip(ids, ex.map(_feat, [cache.get(*i) for i in ids], chunksize=8)))
     speakers = sorted({i[1] for i in items})
     folds = {s: k % N_FOLDS for k, s in enumerate(sorted(speakers, key=lambda s: hashlib.sha256(s.encode()).hexdigest()))}
 
@@ -357,12 +370,14 @@ def diagnostic(a, log):
                 "failed_at_0.60": sorted(k for k, v in mean.items() if v > 0.60),
                 "n": len(sub), "speakers": len({s for _, s, _, _ in sub})}
 
-    result = {"kind": "RVCBench train-candidate 5-fold speaker-grouped acoustic diagnostic (0.60 gate)",
+    out.mkdir(parents=True, exist_ok=True)
+    result = {"kind": "Modern-intake train-candidate 5-fold speaker-grouped acoustic diagnostic (0.60 gate)",
               "gate": 0.60, "train_speakers": len(speakers),
               "enough_speakers": len(speakers) >= 2 * N_FOLDS,
               "pooled": cv(items),
               "per_family": {m: cv([i for i in items if i[0] == m]) for m in sorted({i[0] for i in items})}}
-    (out / "diagnostic.json").write_text(json.dumps(result, indent=1))
+    result["families_n"] = dict(Counter(i[0] for i in items))
+    (Path(a.out) / "diagnostic.json").write_text(json.dumps(result, indent=1))
     log(f"DIAGNOSTIC speakers={len(speakers)} pooled_worst={result['pooled'].get('worst')} "
         f"failed={result['pooled'].get('failed_at_0.60')}")
 
@@ -404,7 +419,8 @@ def main():
     p.add_argument("--panel-readers", help="comma-separated M-AILABS reader names")
     p.add_argument("--dest", type=Path)
     a = p.parse_args()
-    lock = a.out / "writer.lock"
+    # Cache writers share writer.lock; report steps each own their outputs.
+    lock = a.out / ("writer.lock" if a.cmd in ("fetch", "publish") else f"{a.cmd}.lock")
     a.out.mkdir(parents=True, exist_ok=True)
     logf = (a.out / "intake.log").open("a")
 

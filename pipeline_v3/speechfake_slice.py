@@ -114,6 +114,11 @@ def main():
     log = lambda m: print(time.strftime("%Y-%m-%dT%H:%M:%SZ ", time.gmtime()) + m, flush=True)
     if hashlib.sha256(a.meta.read_bytes()).hexdigest() != META_SHA256:
         raise ValueError("SpeechFake metadata.zip differs from the pinned release")
+    lock = a.out / "writer.lock"
+    if lock.exists() and Path("/proc/" + lock.read_text().strip()).exists():
+        raise SystemExit(f"Another cache writer holds {lock}")
+    import os
+    lock.write_text(str(os.getpid()))
     picked, stats = select(a.meta, a.per_system)
     log(f"SELECT {json.dumps(stats)}")
     cache = IntakeCache(a.out)
@@ -209,6 +214,7 @@ def main():
               "seconds": time.time() - t0}
     (out / "lineage.json").write_text(json.dumps(report, indent=1))
     log(f"DONE {json.dumps(report['coverage'])}")
+    lock.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
