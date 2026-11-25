@@ -191,6 +191,12 @@ def main():
         help="explicitly labelled smaller English pilot (requires --languages en); "
         "products live in <stage>-en-subset/",
     )
+    p.add_argument(
+        "--voices",
+        choices=["wavlm", "ecapa"],
+        default="wavlm",
+        help="voice-label source: stage0/voices.csv (WavLM) or stage0-ecapa/voices.csv",
+    )
     a = p.parse_args()
     languages = sorted(set(a.languages))
     if a.subset and (languages != ["en"] or a.release or a.addons):
@@ -199,6 +205,8 @@ def main():
     work = a.data / ("stage5" if a.release else "stage3" if a.addons else "stage0")
     if languages == ["en"]:
         work = work.with_name(work.name + ("-en-subset" if a.subset else "-en"))
+    if a.voices == "ecapa":
+        work = work.with_name(work.name + "-ecapa")
     elif languages != ["en", "hi"]:
         raise SystemExit("Hindi-only runs are not supported; English is always required")
     if a.action == "proof":
@@ -226,7 +234,8 @@ def main():
             if a.action == "jobs":
                 write_csv(root / f"{work.name}-{a.microsoft}-jobs.csv", jobs)
                 return
-        selected = match(rows, load_labels(shared, rows), hindi, a.release)
+        voice_dir = shared if a.voices == "wavlm" else a.data / "stage0-ecapa"
+        selected = match(rows, load_labels(voice_dir, rows), hindi, a.release)
         if a.addons:
             selected = merge(root, selected, jobs, a.release)
         if a.release and not {"freevc24", "chatterboxtts", "gemini"} <= {
