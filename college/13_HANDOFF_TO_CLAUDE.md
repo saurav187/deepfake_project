@@ -1,5 +1,95 @@
 # Pipeline v3 handoff for Claude
 
+## Status 25 Nov 2026, 23:06 IST (Claude)
+
+**Sessions:**
+- The A100 `v3-a100x` was **released at 23:06 IST**.
+- The T4 `v3-t4p` (1.24 CU/h) is still up. It is running the VCC 2018 diagnostic and downloading the V1 weights locally.
+- Balance: **151.95 CU**. That is 31.5 CU used since 18:47 IST and about 46 CU used today.
+
+### V1 exploratory baseline: COMPLETE
+
+Folder `stage0-en-ecapa-xtts-norm-exploratory/`; code `d2d7c24` plus continuation `2171212`. The exception `exploratory-failed-audit-v1` is carried throughout.
+
+- **Pilot:** go=true, 12/12 criteria (20:04–20:59 IST). The advisory record was not needed.
+- **Teacher V1:** trained 20:59–21:51 IST. Chatterbox select EER by epoch: 0.463, 0.479, 0.422, **0.288** (best, epoch 3), 0.343.
+  - Saved `teacher.best.pt`, sha256 `8b4625fb…`, 1.26 GB.
+- **Freeze:** Platt calibration on 1,231 calibrate clips. Thresholds 0.197 / 0.907. On the threshold fold: 1.7% false alarms and 20.3% detection.
+- **`runs/teacher-eval.json`** (21:56–22:55 IST) is bound to the frozen teacher.
+  - **Genuine false alarms:**
+    - validate: 2.2–2.9% on most channels, but **11.4% on MP3** and 0% under noise
+    - LibriSpeech dev: 0.3–1.9%
+    - M-AILABS: 0.4–1.1% (only 3 readers)
+  - **Not flagged as fake** (missed or uncertain), clean audio: XTTS-v2 76%, Chatterbox 96%, ElevenLabs 84%, Gemini 81%, Fish 98%, MLAAD Chatterbox 99%. Under noise, 100% for both validate generators.
+  - **AUC (validate, clean):** XTTS-v2 0.88, Chatterbox 0.71.
+  - **Overall:** cautious but weak. Most clips land in the uncertain band.
+  - **Skipped (<4 s):** LibriSpeech dev 619, MLAAD 503.
+  - **Unmeasured:** real calls, Hindi, MeloTTS, sealed sets.
+
+### `app_testing_dataset/` split (owner decision, 25 Nov)
+
+- A deterministic half of each folder is unsealed for development:
+  - gemini 6, mk 7, sarvam 7, top level 2 (`fake1` and the `.mp4`), 22 files in total
+  - the other 22 files stay **sealed** for the final V2 model
+- The file list and sha256 hashes are in `~/deepfake_eval/app_testing_split-v1.json`, outside the repo. No audio was analysed.
+- V1 local testing waits for the owner's labels for each folder.
+- V1 weights are being copied to `~/deepfake_models/v1-exploratory/`, outside the repo.
+
+### V2 data
+
+**LibriSeVoc**
+- Verified on Drive, MD5 `bee5261d…`.
+- Matched manifest: 13,201 genuine utterances, each with all six vocoders, from 221 readers. **All 221 readers are also PhonemeDF readers.**
+- Train-only shortcut check: pooled 0.547 after normalisation. Failing vocoders: WaveNet 0.655 and DiffWave 0.607.
+
+**ASVspoof 5 training portion**
+- Five `flac_T` archives plus protocols, README and licence, each MD5-checked locally and on Drive.
+- Codex's diagnostic: pooled 0.724 after normalisation, mainly speech ratio. Only A08 passes (0.582).
+
+**LibriTTS train-clean-100**
+- OpenSLR 60, MD5 `4a8c202b…`.
+- Only the transcripts were kept: 33,236 files in `v2/libritts-text/`.
+
+### V2-A: BLOCKED on A08 metadata
+
+- **A08 confirmation:** passed at 0.558 (40 fresh speakers, 320 clips).
+- **Blocker:** ASVspoof 5 publishes no transcripts and no MLS reader mapping, so 0 A08 rows can be admitted.
+- `v2a.py` now reads the shared cache.
+- **Known gap:** V2-A's text-exclusion check doesn't strip punctuation before comparing, so it can't match LibriTTS text against V1's LibriSpeech text. V2-L fixes this with `text_key`; V2-A still needs the same change.
+
+### V2-L (LibriSeVoc-only, `v2/v2l-lsv-norm-1`): PAUSED at a verified cache checkpoint
+
+Code `e014d2f`, runner `pipeline_v3/run_v2l.sh`.
+
+- **Lineage:** 13,201 / 13,201 utterances resolved (LibriTTS transcript plus reader), 221 readers.
+- **Coverage:**
+  - train: 111 readers, 6,226 parents, 31,130 clips
+  - select: 37 readers, 2,039 parents, 10,195 clips
+  - excluded because their readers are in V1 held-out folds: calibrate 2,048, validate 1,818, threshold 1,070 parents
+- **Identity:** all 40 clips byte-identical to the V2-A preprocessing.
+- **Benchmark:** **3.88 clips/s** (8 workers, 12 vCPU A100 VM).
+  - The bottleneck is reading from the ZIP on Drive: 1.77 s per clip per worker, against 0.26 s for processing.
+  - Resume check passed: 1,040 requested, 1,040 skipped, 0 reprocessed.
+- **Paused at 23:05 IST**, right after the benchmark. Cache state:
+  - 1,040 clips, all checksum-verified, in 2 shards and 2 manifests, with no orphan temp files
+  - remaining: 40,285 clips, about 173 min at the measured rate
+- **Formal audit and training are on hold.** Resume with `bash pipeline_v3/run_v2l.sh prepare`, which skips the cached clips.
+- **Speed-up option:** copying the ZIP to local disk first would likely remove the Drive read bottleneck (not measured).
+
+### Shared clip cache `v2/clip-cache/fixed4s-rmsnorm-v1/`
+
+- **Contents:** USTAR shards plus JSONL manifests. Each record holds the source, source ID, locator, preprocessing version, eligibility and reason, sha256, shard and offset.
+- **Safety:** shards and manifests are published atomically. The cache is tied to a fingerprint of the preprocessing code. One writer at a time.
+- **Readers:** V2-L, V2-A, and V2-B in future. Each experiment keeps its own splits, audit and pack.
+
+### V2-B screen: VCC 2018 (DataShare 10.7488/ds/2337, CC BY 4.0)
+
+- All 7 files used were MD5-verified against the publisher's REST checksums.
+- **Lineage from file names:** 20,871 converted clips named `system_target_source_sentence_task`, linking each to its genuine target recording, genuine source recording and evaluation transcript.
+- **Speakers:** 12 (8 source, 4 target), DAPS studio recordings.
+- **Diagnostic:** leave-one-target-out shortcut check running on the T4 (code `583b817`). Output goes to `v2b/vcc2018/diagnostic.json`, with a Drive copy of the files in `development/vcc2018/`.
+- **Real-call coverage: none.** It may only suit a held-out VC test panel.
+
 ## Current V2-A handoff
 
 Use the [V2-A Claude handoff](22_V2A_CLAUDE_HANDOFF.md) for the five-generator baseline, fresh A08 confirmation, metadata joins, formal audit, GPU command and V1 comparison.
