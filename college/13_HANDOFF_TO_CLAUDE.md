@@ -1,5 +1,15 @@
 # Pipeline v3 handoff for Claude
 
+## Final local review of the exploratory Teacher V1 runner
+
+Deploy the reviewed branch including the commit titled **Bind exploratory teacher checkpoints, freeze and resume to the approved run**. The original failed audit remains the baseline's provenance. No Colab job was started during review. The full pipeline suite passed 70 tests (five warnings), and Bash syntax validation passed.
+
+- The exception requires the exact work-directory name and the digest of its original failed report. Stage verifies the copied manifests, index and exception. The pilot, last checkpoint, best weights, frozen threshold and evaluation carry the exception. Only a passing pilot on this pack can authorize the teacher. There is no release, student or sealed-evaluation step in the runner.
+- Stage copies all five folds. Pilot fitting and teacher optimisation use train, model selection uses select, Platt uses calibrate and threshold selection requires 50 recordings per class on threshold. Validate and external panel scoring begin after freeze. Validation loads the same stored normalised crop as training. External panels apply fixed crop and frozen norm before the channel and model view. Reported phone and Opus conditions are simulated.
+- The runner checks prerequisites, resumes a published pack or pilot, and evaluates from an existing frozen teacher without fitting another threshold. Stage and evaluation verify bindings on resume. A disconnect during an epoch resumes from the last completed epoch; interrupted evaluation restarts evaluation. Use one writer. Release the VM separately on success or failure.
+- Panel reader IDs are checked against the pack. External corpora do not supply a universal person ID, so cross-corpus identity independence beyond known reader IDs remains unverified. Ineligible MLAAD parent/fake comparisons are excluded, unknown named-voice counts are excluded, and per-clip results include IDs. Simulated-channel results on read English are not measurements on actual calls.
+- Unmeasured budget on A100 / L4: cache, catalog, pack and stage about 0.75–2.5 h on either (Drive-bound); pilot 0.25–1.5 h / 0.5–2 h; teacher 1–3 h / 2–6 h; freeze and evaluation 0.5–2 h / 1–3 h. These are planning allowances. At the brief's approximate counts, validate and panels alone can require about 19,500 forward passes before crop exclusions, plus calibration and threshold passes. The earlier 13-minute A100 crop cache was measured, not the other stages. Track progress and CU on the actual VM.
+
 ## Exploratory English Teacher V1 baseline: PREPARED, not run (25 Nov 2026, Claude)
 
 The owner approved a separately named exploratory baseline on the frozen-norm PhonemeDF selection despite its failed audit. The code is at `f408e0d` and awaits the final Codex review (`college/21_CODEX_EXPLORATORY_TEACHER_REVIEW.md`). **No GPU is running, and nothing has been trained.**

@@ -47,7 +47,8 @@ def test_voice_labels_reject_changed_shared_inventory(tmp_path):
         stage0.load_labels(tmp_path, rows, shared)
 
 
-def test_xtts_pack_recovery_and_live_binding(tmp_path, monkeypatch):
+@pytest.mark.parametrize("exploratory", [False, True])
+def test_xtts_pack_recovery_and_live_binding(tmp_path, monkeypatch, exploratory):
     work = tmp_path / "stage0-en-ecapa-xtts"
     root = tmp_path / "development"
     work.mkdir()
@@ -83,7 +84,23 @@ def test_xtts_pack_recovery_and_live_binding(tmp_path, monkeypatch):
     monkeypatch.setattr(stage0, "fixed_crop", lambda b: b + b"-crop")
     monkeypatch.setattr(stage0, "descriptors", lambda b: {"duration": 4})
     stage0.audit_selection(root, work, ["en"], stage0.XTTS_ONLY_TRAIN)
-    stage0.catalog(root, work, ["en"])
+    if exploratory:
+        from pipeline_v3 import en_treatment, exploratory as ex
+
+        source = tmp_path / ex.SOURCE
+        source.mkdir()
+        stage0.write_csv(source / "selection.csv", rows)
+        frozen = {"treatment": "norm"}
+        monkeypatch.setattr(en_treatment, "apply", lambda b, name: b + b"-norm")
+        monkeypatch.setattr(en_treatment, "frozen_treatment", lambda _: frozen)
+        monkeypatch.setattr(stage0, "descriptors", lambda b: {"level": int(b.endswith(b"1-crop-norm"))})
+        with pytest.raises(ValueError, match="Nuisance gate failed"):
+            stage0.audit_selection(root, source, ["en"], stage0.XTTS_ONLY_TRAIN, "norm", frozen=frozen)
+        with pytest.raises(ValueError, match="Passing audit required"):
+            stage0.catalog(root, source, ["en"], "norm")
+        exception = ex.create(tmp_path)
+        work = tmp_path / ex.WORK
+    stage0.catalog(root, work, ["en"], "norm" if exploratory else None)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -97,6 +114,7 @@ def test_xtts_pack_recovery_and_live_binding(tmp_path, monkeypatch):
             "--voices",
             "ecapa",
             "--xtts-only",
+            *(["--exploratory", "--treatment", "norm"] if exploratory else []),
         ],
     )
     stage0.main()
@@ -104,10 +122,13 @@ def test_xtts_pack_recovery_and_live_binding(tmp_path, monkeypatch):
     index = pack / "index.json"
     (work / "audit.json").unlink()
     stage0.main()
-    assert bound_audit(work, index)["pass"]
+    bound = bound_audit(work, index)
+    assert bound["pass"] == (not exploratory)
+    if exploratory:
+        assert bound["exception"] == exception
     stage(pack, tmp_path / "local", {"train", "select"})
     for row in entries(tmp_path / "local", {"train", "select"}):
-        assert payload(tmp_path / "local", row) == row["id"].encode() + b"-crop"
+        assert payload(tmp_path / "local", row) == row["id"].encode() + (b"-crop-norm" if exploratory else b"-crop")
 
     # Re-running match or audit invalidates the old authorization.
     selection = work / "selection.csv"
@@ -118,14 +139,14 @@ def test_xtts_pack_recovery_and_live_binding(tmp_path, monkeypatch):
     selection.write_bytes(original)
     prep = work / "prep-audit.json"
     original = prep.read_bytes()
-    prep.write_text(json.dumps(dict(json.loads(original), **{"pass": False})))
-    with pytest.raises(ValueError, match="changed since pack"):
+    prep.write_text(json.dumps(dict(json.loads(original), failed_fields=["changed"], **{"pass": False})))
+    with pytest.raises(ValueError, match="changed since pack|does not match"):
         bound_audit(work, index)
     prep.write_bytes(original)
     catalog = work / "catalog.csv"
     original = catalog.read_bytes()
     catalog.write_bytes(
-        original.replace(b"stage0-en-ecapa-xtts/bytes/", b"stage0-en-ecapa/bytes/")
+        original.replace(f"{work.name}/bytes/".encode(), b"stage0-en-ecapa/bytes/")
     )
     with pytest.raises(ValueError, match="different experiment"):
         stage0.main()

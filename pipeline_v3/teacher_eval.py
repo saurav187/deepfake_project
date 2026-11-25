@@ -40,7 +40,6 @@ UNMEASURED = {
 
 
 def _model(encoder, device):
-    import torch
 
     from .models import Teacher
 
@@ -48,35 +47,57 @@ def _model(encoder, device):
 
 
 def mean_logit(model, x, device):
-    from .train import logits
-
     from .audio import windows
+    from .train import logits
 
     if not list(windows(x)):
         return None
     return float(logits(model, x, False, device).mean().cpu())
 
 
+def teacher_context(cfg):
+    from .cli import bound_audit
+
+    audit = bound_audit(cfg.data, cfg.local / "index.json")
+    pilot = json.loads((cfg.data / "pilot.json").read_text())
+    if (pilot.get("go") is not True or pilot.get("index_sha256") != audit["index_sha256"]
+            or pilot.get("exception") != audit.get("exception")
+            or pilot.get("languages") != audit.get("languages_audited")):
+        raise ValueError("Passing pilot must match this pack, language and exception")
+    return audit
+
+
+def load_teacher(cfg, best, device, audit):
+    import torch
+
+    state = torch.load(best, map_location="cpu", weights_only=True)
+    if audit.get("exception"):
+        if (state.get("index_sha256") != audit["index_sha256"]
+                or state.get("exception") != audit["exception"]
+                or state.get("encoder") != str(cfg.encoder)):
+            raise ValueError("Teacher checkpoint differs from this pack or exception")
+        state = state["model"]
+    model = _model(cfg.encoder, device)
+    model.load_state_dict(state)
+    return model.eval()
+
+
 def freeze(cfg):
     import torch
     from scipy.special import expit
 
+    from .audio import decode, model_view
     from .data import digest, entries, payload
     from .export import platt
-    from .audio import decode, model_view
 
     runs = cfg.data / "runs"
     out = runs / "teacher-frozen.json"
     if out.exists():
         raise ValueError("Teacher and threshold are already frozen")
-    pilot = json.loads((cfg.data / "pilot.json").read_text())
-    if not pilot.get("go"):
-        raise ValueError("Pilot did not pass")
+    audit = teacher_context(cfg)
     best = runs / "teacher.best.pt"
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = _model(cfg.encoder, device)
-    model.load_state_dict(torch.load(best, map_location=device, weights_only=True))
-    model.eval()
+    model = load_teacher(cfg, best, device, audit)
 
     def collect(split):
         out_rows = []
@@ -95,7 +116,6 @@ def freeze(cfg):
         raise ValueError("Need at least 50 threshold-fold recordings per class")
     lo = min(0.40, float(np.quantile(groups[1], 0.02, method="lower")))
     hi = max(0.60, float(np.nextafter(np.quantile(groups[0], 0.98, method="higher"), 1.0)))
-    audit = json.loads((cfg.data / "audit.json").read_text())
     record = {
         "teacher_sha256": digest(best),
         "index_sha256": digest(cfg.local / "index.json"),
@@ -110,7 +130,9 @@ def freeze(cfg):
         "exception": audit.get("exception"),
     }
     runs.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(record, indent=2))
+    tmp = out.with_suffix(".tmp")
+    tmp.write_text(json.dumps(record, indent=2))
+    tmp.replace(out)
     return record
 
 
@@ -130,7 +152,7 @@ def summarise(items, key):
         out["/".join(k)] = {
             "clips": n,
             "readers": len({x["speaker"] for x in v}),
-            "voices": len({x["voice"] for x in v if x.get("voice")}) if fake else 0,
+            "voices": len({x["voice"] for x in v if x.get("voice") not in {None, "", "-", "unknown"}}) if fake else 0,
             "likely_fake": sum(x["verdict"] == "likely_fake" for x in v),
             "uncertain": sum(x["verdict"] == "uncertain" for x in v),
             "likely_real": sum(x["verdict"] == "likely_real" for x in v),
@@ -149,9 +171,11 @@ def separability(items):
         gen = [x for x in items if x["channel"] == ch and x["label"] == "0"]
         for g in sorted({x["generator"] for x in items if x["label"] == "1"}):
             fk = [x for x in items if x["channel"] == ch and x["generator"] == g]
-            if gen and fk:
-                y = [0] * len(gen) + [1] * len(fk)
-                out[f"{g}/{ch}"] = metrics(y, [x["p"] for x in gen + fk])
+            parents = {x["parent"] for x in fk}
+            controls = [x for x in gen if x["parent"] in parents]
+            if controls and fk:
+                y = [0] * len(controls) + [1] * len(fk)
+                out[f"{g}/{ch}"] = metrics(y, [x["p"] for x in controls + fk])
     return out
 
 
@@ -184,9 +208,9 @@ def panel_rows(dev, names):
                 reader = r["real_member"].split("/by_book/")[-1].split("/")[1]
                 rows.append(dict(id="mlaad/" + r["fake_archive"], archive=r["fake_archive"], member=r["fake_member"],
                                  label="1", generator="mlaad/" + fam, panel="mlaad", speaker="mailabs/" + reader,
-                                 voice=r["voice"]))
+                                 voice=r["voice"], parent="mailabs/" + r["real_member"]))
                 rows.append(dict(id="mailabs/" + r["real_member"], archive=r["real_archive"], member=r["real_member"],
-                                 label="0", generator="genuine", panel="mlaad", speaker="mailabs/" + reader, voice=""))
+                                 label="0", generator="genuine", panel="mlaad", speaker="mailabs/" + reader, voice="", parent="mailabs/" + r["real_member"]))
         seen, unique = set(), []
         for r in rows:
             if r["id"] not in seen:
@@ -196,12 +220,19 @@ def panel_rows(dev, names):
     return rows
 
 
+def matched_panel_scores(items):
+    """Keep MLAAD parents and renditions together after four-second eligibility."""
+    eligible = {(r["parent"], r["channel"], r["label"]) for r in items if r["panel"] == "mlaad"}
+    return [r for r in items if r["panel"] != "mlaad"
+            or (r["parent"], r["channel"], "1" if r["label"] == "0" else "0") in eligible]
+
+
 def evaluate(cfg):
     import torch
     from scipy.special import expit
 
     from .audio import channel, decode, fixed_crop, model_view
-    from .data import digest, entries, payload, safe_path
+    from .data import digest, entries, payload
     from .en_treatment import apply
     from .stage0 import groups as by_archive
 
@@ -210,11 +241,12 @@ def evaluate(cfg):
     best = runs / "teacher.best.pt"
     if digest(best) != frozen["teacher_sha256"] or digest(cfg.local / "index.json") != frozen["index_sha256"]:
         raise ValueError("Teacher or pack changed since the threshold was frozen")
+    audit = teacher_context(cfg)
+    if frozen.get("exception") != audit.get("exception"):
+        raise ValueError("Frozen exception differs from the bound audit")
     (a, b), (lo, hi) = frozen["platt"], frozen["thresholds"]
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = _model(cfg.encoder, device)
-    model.load_state_dict(torch.load(best, map_location=device, weights_only=True))
-    model.eval()
+    model = load_teacher(cfg, best, device, audit)
 
     def judge(raw, row, chans):
         res = []
@@ -224,7 +256,7 @@ def evaluate(cfg):
             if s is None:
                 continue
             p = float(expit(a * s + b))
-            res.append(dict(label=row["label"], generator=row["generator"], speaker=row["speaker"],
+            res.append(dict(id=row["id"], parent=row.get("parent", row["id"]), label=row["label"], generator=row["generator"], speaker=row["speaker"],
                             voice=row.get("voice", ""), channel=ch, p=p, verdict=verdict(p, lo, hi),
                             panel=row.get("panel", "validate")))
         return res
@@ -236,17 +268,31 @@ def evaluate(cfg):
             skipped["validate"] += not got
             items += got
         panels = panel_rows(cfg.dev, cfg.panels) if cfg.panels else []
+        if panels:
+            from .data import SPLITS
+            fold_readers = {r["speaker"] for r in entries(cfg.local, SPLITS)}
+            if any(r["speaker"] in fold_readers for r in panels):
+                raise ValueError("Development panel reader also occurs in decision folds")
         from .adapters import selected_members
 
-        root = cfg.dev / "development"
-        for r, blob in selected_members(by_archive(root, panels)):
+        archives = by_archive(cfg.dev / "development", panels) if panels else {}
+        for r, blob in selected_members(archives):
             crop = fixed_crop(blob)
             if crop is None:
                 skipped[r["panel"]] += 1
                 continue
             items += judge(decode(apply(crop, "norm")), r, PANEL_CHANNELS)
+    matched = matched_panel_scores(items)
+    unmatched = len(items) - len(matched)
+    items = matched
     val = [x for x in items if x["panel"] == "validate"]
     pan = [x for x in items if x["panel"] != "validate"]
+    unmeasured = dict(UNMEASURED)
+    for name in cfg.panels or []:
+        if not any(x["panel"].split("/")[0] == name for x in pan):
+            unmeasured[name] = "No eligible development panel clips were scored"
+    if not val:
+        raise ValueError("No eligible validation clips were scored")
     result = {
         "kind": "EXPLORATORY Teacher V1 baseline evaluation" if frozen.get("exception") else "Teacher V1 evaluation",
         "exception": frozen.get("exception"),
@@ -256,7 +302,8 @@ def evaluate(cfg):
         "panels_by_generator_channel": summarise(pan, lambda x: (x["panel"], x["generator"], x["channel"])),
         "panels_requested": list(cfg.panels or []),
         "skipped_shorter_than_4s": dict(skipped),
-        "unmeasured": UNMEASURED,
+        "mlaad_unpaired_channel_scores_excluded": unmatched,
+        "unmeasured": unmeasured,
         "notes": [
             "Validate readers and voices are disjoint from train; Chatterbox never trained.",
             "Channel effects are simulated from clean development audio.",
@@ -264,11 +311,17 @@ def evaluate(cfg):
             "Sealed sets were not touched.",
         ],
     }
-    (runs / "teacher-eval.json").write_text(json.dumps(result, indent=2))
-    with (runs / "teacher-eval-clips.csv").open("w", newline="") as f:
+    clips = runs / "teacher-eval-clips.csv"
+    tmp = clips.with_suffix(".tmp")
+    with tmp.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(items[0]))
         w.writeheader()
         w.writerows(items)
+    tmp.replace(clips)
+    output = runs / "teacher-eval.json"
+    tmp = output.with_suffix(".tmp")
+    tmp.write_text(json.dumps(result, indent=2))
+    tmp.replace(output)
     return result
 
 

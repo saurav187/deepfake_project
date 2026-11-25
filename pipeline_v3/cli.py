@@ -147,6 +147,7 @@ def main():
         cfg.languages = sorted(set(cfg.languages))
         if audit_report.get("languages_audited", ["en", "hi"]) != cfg.languages:
             raise ValueError("Pilot languages differ from the audited languages")
+        cfg.exception = audit_report.get("exception")
         pilot(cfg)
     elif cfg.action in {"teacher", "student"}:
         from .train import train
@@ -162,8 +163,13 @@ def main():
             raise ValueError("Pilot criteria have not passed for this pack")
         if report.get("languages", ["en", "hi"]) != audit.get("languages_audited", ["en", "hi"]):
             raise ValueError("Pilot and audit languages differ")
+        cfg.exception = audit.get("exception")
+        if report.get("exception") != cfg.exception:
+            raise ValueError("Pilot exception differs from the bound audit")
         train(cfg, cfg.action == "student")
-    elif cfg.action in {"export", "evaluate", "benchmark"} and (cfg.data / "exception.json").exists():
+    elif cfg.action in {"export", "evaluate", "benchmark"} and (
+        (cfg.data / "exception.json").exists() or cfg.data.name.endswith("-exploratory")
+    ):
         raise ValueError(f"{cfg.action} is not allowed for an exploratory failed-audit run")
     elif cfg.action == "export":
         from .export import export

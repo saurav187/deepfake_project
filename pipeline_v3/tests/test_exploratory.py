@@ -136,3 +136,97 @@ def test_panels_are_deterministic_and_outside_folds(tmp_path):
     assert sum(r["label"] == "0" for r in mlaad) == 1  # shared real parent kept once
     assert {r["speaker"] for r in mlaad} == {"mailabs/elliot_miller"}
     assert te.panel_rows(tmp_path, ["libri-dev", "mlaad"]) == rows
+
+
+def test_copied_exception_in_another_suffix_dir_is_refused(tmp_path):
+    import shutil
+
+    report = failed_source(tmp_path)
+    ex.create(tmp_path)
+    other = tmp_path / "other-exploratory"
+    shutil.copytree(tmp_path / ex.WORK, other)
+    with pytest.raises(ValueError):
+        ex.exception_for(other, report)
+
+
+def test_freeze_rejects_stale_pilot_and_best(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import torch
+
+    from pipeline_v3 import cli
+
+    cfg = SimpleNamespace(data=tmp_path, local=tmp_path, encoder=tmp_path)
+    audit = {"index_sha256": "one", "exception": {"exception": ex.NAME}, "languages_audited": ["en"]}
+    monkeypatch.setattr(cli, "bound_audit", lambda *_: audit)
+    pilot = {"go": True, "languages": ["en"], "exception": audit["exception"], "index_sha256": "other"}
+    (tmp_path / "pilot.json").write_text(json.dumps(pilot))
+    with pytest.raises(ValueError, match="Passing pilot"):
+        te.freeze(cfg)
+    best = tmp_path / "best.pt"
+    torch.save({"model": {}, "exception": None, "index_sha256": "one"}, best)
+    with pytest.raises(ValueError, match="Teacher checkpoint"):
+        te.load_teacher(cfg, best, "cpu", audit)
+
+
+def test_mlaad_pair_eligibility_is_per_channel():
+    rows = [
+        {"panel": "mlaad", "label": label, "parent": parent, "channel": channel}
+        for label, parent, channel in (("0", "a", "clean"), ("1", "a", "clean"),
+                                       ("0", "a", "opus"), ("1", "b", "clean"))
+    ]
+    assert te.matched_panel_scores(rows) == rows[:2]
+
+
+def test_freeze_then_evaluate_binds_checkpoint_and_index(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import torch
+
+    from pipeline_v3 import audio, cli, data
+
+    cfg = SimpleNamespace(data=tmp_path, local=tmp_path, encoder=tmp_path, dev=None, panels=[])
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    with pytest.raises(FileNotFoundError):
+        te.evaluate(cfg)
+    index = tmp_path / "index.json"
+    index.write_text("fixture")
+    audit = {"exception": {"exception": ex.NAME}, "index_sha256": digest(index), "languages_audited": ["en"]}
+    monkeypatch.setattr(cli, "bound_audit", lambda *_: audit)
+    (tmp_path / "pilot.json").write_text(json.dumps(
+        {"go": True, "index_sha256": digest(index), "languages": ["en"], "exception": audit["exception"]}
+    ))
+    best = runs / "teacher.best.pt"
+    torch.save({"exception": audit["exception"], "index_sha256": digest(index),
+                "encoder": str(cfg.encoder), "model": {}}, best)
+    monkeypatch.setattr(te, "_model", lambda *_: torch.nn.Identity())
+    monkeypatch.setattr(te, "mean_logit", lambda model, raw, device: raw)
+    monkeypatch.setattr(data, "payload", lambda local, r: float(r["label"]))
+    monkeypatch.setattr(audio, "decode", lambda b: b)
+    monkeypatch.setattr(audio, "model_view", lambda raw, r: raw)
+    monkeypatch.setattr(audio, "channel", lambda raw, *args: raw)
+    seen = []
+
+    def rows(local, splits):
+        split, = splits
+        seen.append(split)
+        return [{"id": f"{split}-{i}", "parent": str(i // 2), "speaker": str(i // 2),
+                 "label": str(i % 2), "generator": "tts" if i % 2 else "-"} for i in range(100)]
+
+    monkeypatch.setattr(data, "entries", rows)
+    frozen = te.freeze(cfg)
+    assert seen == ["calibrate", "threshold"]
+    assert frozen["exception"] == audit["exception"]
+    with pytest.raises(ValueError, match="already frozen"):
+        te.freeze(cfg)
+    report = te.evaluate(cfg)
+    assert seen[-1] == "validate" and report["exception"] == frozen["exception"]
+    assert report["validate_by_generator_channel"]["tts/clean"]["clips"] == 50
+    index.write_text("different pack")
+    with pytest.raises(ValueError, match="changed since"):
+        te.evaluate(cfg)
+    index.write_text("fixture")
+    best.write_bytes(b"different weights")
+    with pytest.raises(ValueError, match="changed since"):
+        te.evaluate(cfg)

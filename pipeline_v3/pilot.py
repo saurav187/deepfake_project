@@ -205,6 +205,8 @@ def pilot(cfg):
                     if rep in {"full", "lfcc", "first4", "first6"}:
                         stats.update(bootstrap(dev, scores, 200))
                     report["models"][f"{tag}/{rep}/{method}/{view}"] = stats
+    if getattr(cfg, "exception", None):
+        report["exception"] = cfg.exception
     decisions = pilot_decisions(report["models"], rows, languages)
     report.update(
         index_sha256=digest(cfg.local / "index.json"),

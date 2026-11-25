@@ -58,6 +58,9 @@ def train(cfg, student):
         cfg.steps,
         digest(teacher_path) if student else "teacher",
     ]
+    exception = getattr(cfg, "exception", None)
+    if exception:
+        provenance.append(exception)
     last = work / f"{name}.last.pt"
     best_path = work / f"{name}.best.pt"
     opt = torch.optim.AdamW(
@@ -123,7 +126,11 @@ def train(cfg, student):
         eer = metric["eer"]
         if eer < best:
             best, stale = eer, 0
-            atomic_save(model.state_dict(), best_path)
+            checkpoint = model.state_dict()
+            if exception:
+                checkpoint = {"model": checkpoint, "exception": exception,
+                              "index_sha256": provenance[0], "encoder": str(cfg.encoder)}
+            atomic_save(checkpoint, best_path)
         else:
             stale += 1
         atomic_save(

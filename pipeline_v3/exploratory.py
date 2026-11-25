@@ -2,7 +2,7 @@
 
 A separately named English Teacher V1 baseline is trained on the frozen-norm PhonemeDF
 XTTS-only selection, DESPITE its failed nuisance audit. The default gate is unchanged:
-only a work directory whose name ends in EXPLORATORY_SUFFIX and that carries a valid
+only a work directory named WORK and that carries a valid
 exception.json bound to the exact failed report may pass catalog, pack, stage, pilot and
 teacher. Student, export, release and sealed evaluation always refuse such a run.
 
@@ -62,7 +62,9 @@ def create(data):
         "known_shortcuts": "fakes are band-limited and darker (upper_band, rolloff, tilt) "
         "with higher speech ratio; see stage0-en-ecapa-xtts-norm/explain/explain.json",
     }
-    (dst / "exception.json").write_text(json.dumps(record, indent=2))
+    tmp = dst / "exception.tmp"
+    tmp.write_text(json.dumps(record, indent=2))
+    tmp.replace(dst / "exception.json")
     return record
 
 
@@ -72,13 +74,17 @@ def exception_for(work, report):
     if report.get("pass"):
         return None
     path = Path(work) / "exception.json"
-    if not Path(work).name.endswith(EXPLORATORY_SUFFIX) or not path.exists():
+    if Path(work).name != WORK or not path.exists():
         raise ValueError("Failed nuisance audit; only a recorded exploratory exception may proceed")
     record = json.loads(path.read_text())
     prep = Path(work) / "prep-audit.json"
     if (
         record.get("exception") != NAME
         or record.get("failed_report_sha256") != digest(prep)
+        or record["failed_report_sha256"] != digest(Path(work).parent / SOURCE / "prep-audit.json")
+        or record.get("failed_report") != f"{SOURCE}/prep-audit.json"
+        or report.get("pass") is not False
+        or (report.get("treatment") or {}).get("treatment") != "norm"
         or record.get("failed_fields") != report.get("failed_fields")
     ):
         raise ValueError("Exploratory exception does not match this failed report")
