@@ -96,12 +96,76 @@ def refuse(work, action):
         raise ValueError(f"{action} is not allowed for an exploratory failed-audit run")
 
 
+PILOT_ADVISORY = "pilot-advisory.json"
+
+
+def record_pilot_advisory(work):
+    """Owner approval (25 Nov 2026): in the exploratory run only, the pilot's PERFORMANCE
+    result is advisory. The completed pilot report is kept as is; this record binds to it.
+    Integrity checks (pack index, audit exception, languages) remain mandatory."""
+    import json
+
+    from .cli import bound_audit
+
+    work = Path(work)
+    if not work.name.endswith(EXPLORATORY_SUFFIX) or not (work / "exception.json").exists():
+        raise ValueError("Advisory pilot is only for the recorded exploratory run")
+    out = work / PILOT_ADVISORY
+    if out.exists():
+        raise ValueError("Pilot advisory already recorded")
+    pilot = json.loads((work / "pilot.json").read_text())
+    audit = json.loads((work / "audit.json").read_text())
+    if (pilot.get("index_sha256") != audit.get("index_sha256")
+            or pilot.get("exception") != audit.get("exception")
+            or pilot.get("languages") != audit.get("languages_audited")):
+        raise ValueError("Completed pilot does not match this pack, exception and languages")
+    record = {
+        "advisory": "exploratory-pilot-advisory-v1",
+        "approved_by": "owner",
+        "approved_on": "2026-11-25",
+        "scope": "Exploratory V1 only. The pilot ran to completion and its pass/fail result "
+        "is kept unchanged in pilot.json; a missed performance target does not stop Teacher "
+        "V1. The audit and pilot are not rerun. Data-integrity and execution checks stay.",
+        "pilot_go": pilot.get("go"),
+        "pilot_sha256": digest(work / "pilot.json"),
+        "index_sha256": audit["index_sha256"],
+        "exception": audit["exception"]["exception"],
+    }
+    out.write_text(json.dumps(record, indent=2))
+    return record
+
+
+def pilot_authorizes(work, pilot, audit):
+    """True if the pilot passed, or (exploratory only) a valid advisory record binds to this
+    exact completed pilot report. Integrity mismatches always refuse."""
+    import json
+
+    work = Path(work)
+    if (pilot.get("index_sha256") != audit.get("index_sha256")
+            or pilot.get("exception") != audit.get("exception")
+            or pilot.get("languages") != audit.get("languages_audited")):
+        return False
+    if pilot.get("go") is True:
+        return True
+    path = work / PILOT_ADVISORY
+    if not audit.get("exception") or not work.name.endswith(EXPLORATORY_SUFFIX) or not path.exists():
+        return False
+    rec = json.loads(path.read_text())
+    return (rec.get("advisory") == "exploratory-pilot-advisory-v1"
+            and rec.get("pilot_sha256") == digest(work / "pilot.json")
+            and rec.get("index_sha256") == audit["index_sha256"]
+            and rec.get("pilot_go") == pilot.get("go"))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("action", choices=["create"])
+    p.add_argument("action", choices=["create", "pilot-advisory"])
     p.add_argument("--data", type=Path, required=True)
     a = p.parse_args()
-    print(json.dumps(create(a.data), indent=2))
+    if a.action == "create":
+        print(json.dumps(create(a.data), indent=2))
+    else:
+        print(json.dumps(record_pilot_advisory(a.data / WORK), indent=2))
 
 
 if __name__ == "__main__":

@@ -60,10 +60,10 @@ def teacher_context(cfg):
 
     audit = bound_audit(cfg.data, cfg.local / "index.json")
     pilot = json.loads((cfg.data / "pilot.json").read_text())
-    if (pilot.get("go") is not True or pilot.get("index_sha256") != audit["index_sha256"]
-            or pilot.get("exception") != audit.get("exception")
-            or pilot.get("languages") != audit.get("languages_audited")):
-        raise ValueError("Passing pilot must match this pack, language and exception")
+    from .exploratory import pilot_authorizes
+
+    if not pilot_authorizes(cfg.data, pilot, audit):
+        raise ValueError("Passing pilot (or a recorded exploratory advisory) must match this pack, language and exception")
     return audit
 
 
@@ -128,6 +128,9 @@ def freeze(cfg):
         "threshold_fold_false_alarm": float(np.mean(np.array(groups[0]) >= hi)),
         "threshold_fold_detection": float(np.mean(np.array(groups[1]) >= hi)),
         "exception": audit.get("exception"),
+        "pilot_go": json.loads((cfg.data / "pilot.json").read_text()).get("go"),
+        "pilot_advisory": json.loads((cfg.data / "pilot-advisory.json").read_text())
+        if (cfg.data / "pilot-advisory.json").exists() else None,
     }
     runs.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".tmp")
@@ -161,6 +164,29 @@ def summarise(items, key):
             ),
         }
     return out
+
+
+def failures(items, label):
+    """Genuine (label 0): false alarms per source x channel. Fake (label 1): misses per
+    source x generator x channel; 'missed' = likely_real, 'uncertain' reported separately."""
+    out = {}
+    for it in items:
+        if it["label"] != label:
+            continue
+        key = (it["panel"], it["channel"]) if label == "0" else (it["panel"], it["generator"], it["channel"])
+        c = out.setdefault("/".join(key), {"clips": 0, "readers": set(), "likely_fake": 0,
+                                            "uncertain": 0, "likely_real": 0})
+        c["clips"] += 1
+        c["readers"].add(it["speaker"])
+        c[it["verdict"]] += 1
+    for c in out.values():
+        c["readers"] = len(c["readers"])
+        if label == "0":
+            c["false_alarm_rate"] = c["likely_fake"] / c["clips"]
+        else:
+            c["missed_rate"] = c["likely_real"] / c["clips"]
+            c["not_detected_rate"] = (c["likely_real"] + c["uncertain"]) / c["clips"]
+    return dict(sorted(out.items()))
 
 
 def separability(items):
@@ -300,6 +326,8 @@ def evaluate(cfg):
         "validate_by_generator_channel": summarise(val, lambda x: (x["generator"], x["channel"])),
         "validate_separability": separability(val),
         "panels_by_generator_channel": summarise(pan, lambda x: (x["panel"], x["generator"], x["channel"])),
+        "false_alarms_on_genuine_by_channel": failures(items, "0"),
+        "missed_fakes_by_generator": failures(items, "1"),
         "panels_requested": list(cfg.panels or []),
         "skipped_shorter_than_4s": dict(skipped),
         "mlaad_unpaired_channel_scores_excluded": unmatched,

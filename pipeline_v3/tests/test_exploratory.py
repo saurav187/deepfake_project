@@ -230,3 +230,52 @@ def test_freeze_then_evaluate_binds_checkpoint_and_index(tmp_path, monkeypatch):
     best.write_bytes(b"different weights")
     with pytest.raises(ValueError, match="changed since"):
         te.evaluate(cfg)
+
+
+def _bound(tmp_path, go):
+    failed_source(tmp_path)
+    rec = ex.create(tmp_path)
+    work = tmp_path / ex.WORK
+    audit = {"index_sha256": "idx", "exception": rec, "languages_audited": ["en"]}
+    (work / "audit.json").write_text(json.dumps(audit))
+    pilot = {"go": go, "index_sha256": "idx", "exception": rec, "languages": ["en"]}
+    (work / "pilot.json").write_text(json.dumps(pilot))
+    return work, audit, pilot
+
+
+def test_advisory_pilot_authorizes_only_with_bound_record(tmp_path):
+    work, audit, pilot = _bound(tmp_path, False)
+    assert not ex.pilot_authorizes(work, pilot, audit)
+    rec = ex.record_pilot_advisory(work)
+    assert rec["pilot_go"] is False
+    assert ex.pilot_authorizes(work, pilot, audit)
+    with pytest.raises(ValueError):
+        ex.record_pilot_advisory(work)  # once
+    # integrity still enforced
+    assert not ex.pilot_authorizes(work, dict(pilot, index_sha256="other"), audit)
+    # a changed pilot report breaks the binding
+    (work / "pilot.json").write_text(json.dumps(dict(pilot, extra=1)))
+    assert not ex.pilot_authorizes(work, pilot, audit)
+
+
+def test_advisory_refused_outside_exploratory(tmp_path):
+    failed_source(tmp_path)
+    src = tmp_path / ex.SOURCE
+    (src / "pilot.json").write_text("{}")
+    with pytest.raises(ValueError):
+        ex.record_pilot_advisory(src)
+    audit = {"index_sha256": "i", "exception": None, "languages_audited": ["en"]}
+    assert not ex.pilot_authorizes(src, {"go": False, "index_sha256": "i", "exception": None, "languages": ["en"]}, audit)
+
+
+def test_failure_report_counts_false_alarms_and_misses():
+    items = [
+        dict(label="0", panel="validate", channel="opus", generator="genuine", speaker="a", verdict="likely_fake"),
+        dict(label="0", panel="validate", channel="opus", generator="genuine", speaker="b", verdict="likely_real"),
+        dict(label="1", panel="validate", channel="clean", generator="chatterboxtts", speaker="a", verdict="likely_real"),
+        dict(label="1", panel="validate", channel="clean", generator="chatterboxtts", speaker="b", verdict="uncertain"),
+    ]
+    fa = te.failures(items, "0")["validate/opus"]
+    assert fa["false_alarm_rate"] == 0.5 and fa["readers"] == 2
+    miss = te.failures(items, "1")["validate/chatterboxtts/clean"]
+    assert miss["missed_rate"] == 0.5 and miss["not_detected_rate"] == 1.0

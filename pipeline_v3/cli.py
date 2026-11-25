@@ -159,7 +159,11 @@ def main():
 
         audit = bound_audit(cfg.data, cfg.local / "index.json")
         report = json.loads((cfg.data / "pilot.json").read_text())
-        if not report.get("go") or report.get("index_sha256") != audit["index_sha256"]:
+        from .exploratory import pilot_authorizes
+
+        if report.get("index_sha256") != audit["index_sha256"] or not (
+            report.get("go") or pilot_authorizes(cfg.data, report, audit)
+        ):
             raise ValueError("Pilot criteria have not passed for this pack")
         if report.get("languages", ["en", "hi"]) != audit.get("languages_audited", ["en", "hi"]):
             raise ValueError("Pilot and audit languages differ")
