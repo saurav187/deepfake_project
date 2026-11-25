@@ -26,9 +26,23 @@ def groups(root, rows):
     return result
 
 
-def transformed(root, rows):
-    for r, b in selected_members(groups(root, rows)):
-        yield r, fixed_crop(b) if r["pair"] == "phonemedf" else b
+def transformed(root, rows, treatment=None, crops=None):
+    """Model-input bytes. treatment: a frozen en_treatment name applied to the 4 s crop of
+    both labels; crops: (cache dir, verified manifest) replacing the archive read."""
+    if treatment or crops:
+        from .en_treatment import apply, cached
+
+        if any(r["pair"] != "phonemedf" for r in rows):
+            raise ValueError("Treated or cached crops are only for PhonemeDF rows")
+    if crops:
+        source = ((r, cached(crops[0], crops[1], r["id"])) for r in rows)
+    else:
+        source = (
+            (r, fixed_crop(b) if r["pair"] == "phonemedf" else b)
+            for r, b in selected_members(groups(root, rows))
+        )
+    for r, c in source:
+        yield r, (apply(c, treatment) if treatment and c is not None else c)
 
 
 TRAIN_FAMILIES = {"xtts_v2", "melotts"}
@@ -101,12 +115,13 @@ def subset(rows, quotas=SUBSET_QUOTAS):
     ]
 
 
-def audit_selection(root, work, languages=("en", "hi"), train_need=TRAIN_FAMILIES):
+def audit_selection(root, work, languages=("en", "hi"), train_need=TRAIN_FAMILIES,
+                    treatment=None, crops=None, frozen=None):
     selection_sha256 = digest(work / "selection.csv")
     rows = read(work / "selection.csv")
     hashes = {}
     features = {}
-    for r, b in transformed(root, rows):
+    for r, b in transformed(root, rows, treatment, crops):
         if b is None:
             continue
         hashes[r["id"]] = hashlib.sha256(b).hexdigest()
@@ -128,6 +143,7 @@ def audit_selection(root, work, languages=("en", "hi"), train_need=TRAIN_FAMILIE
         selection_sha256=selection_sha256,
         dropped=len(rows) - len(kept),
         counts=counts(kept),
+        treatment=frozen,
     )
     write_csv(work / "eligible.csv", kept)
     report["eligible_sha256"] = digest(work / "eligible.csv")
@@ -138,10 +154,11 @@ def audit_selection(root, work, languages=("en", "hi"), train_need=TRAIN_FAMILIE
         raise ValueError(f"Nuisance gate failed; see {work / 'prep-audit.json'}")
 
 
-def catalog(root, work, languages=("en", "hi")):
+def catalog(root, work, languages=("en", "hi"), treatment=None, crops=None):
     report = json.loads((work / "prep-audit.json").read_text())
     if (
-        report.get("policy") != POLICY
+        (report.get("treatment") or {}).get("treatment") != treatment
+        or report.get("policy") != POLICY
         or report.get("languages_audited") != sorted(languages)
         or not report["pass"]
         or digest(work / "eligible.csv") != report["eligible_sha256"]
@@ -151,7 +168,7 @@ def catalog(root, work, languages=("en", "hi")):
     rows = read(work / "eligible.csv")
     dest = root / work.name / "bytes"
     dest.mkdir(parents=True, exist_ok=True)
-    for r, b in transformed(root, rows):
+    for r, b in transformed(root, rows, treatment, crops):
         if b is None or hashlib.sha256(b).hexdigest() != r["sha256"]:
             raise ValueError("Source changed after audit")
         path = dest / (r["id"] + ".audio")
@@ -220,19 +237,33 @@ def main():
         help="separately named English experiment: XTTS-v2 is the only train family, "
         "MeloTTS rows are dropped, Chatterbox stays held out; products in <stage>-...-xtts/",
     )
+    p.add_argument(
+        "--treatment",
+        choices=["norm", "norm_lp7k", "norm_opus"],
+        help="English XTTS-only: audit/catalog/pack the FROZEN shared treatment (see "
+        "en_treatment.py) of the original selection; products in <...-xtts>-<treatment>/",
+    )
+    p.add_argument("--crop-cache", type=Path, help="verified en_treatment crop cache")
     a = p.parse_args()
     languages = sorted(set(a.languages))
     if a.subset and (languages != ["en"] or a.release or a.addons):
         raise SystemExit("--subset is only for the English-only Stage 1/2 pilot")
     if a.xtts_only and (languages != ["en"] or a.voices != "ecapa" or a.release or a.addons or a.subset):
         raise SystemExit("--xtts-only requires --languages en --voices ecapa (Stage 1/2 only)")
+    if (a.treatment or a.crop_cache) and not a.xtts_only:
+        raise SystemExit("--treatment/--crop-cache are only for the English XTTS-only run")
+    if a.treatment and a.action in {"match", "jobs", "inventory", "proof"}:
+        raise SystemExit("A treated run reuses the original selection; it never re-matches")
     train_need = XTTS_ONLY_TRAIN if a.xtts_only else TRAIN_FAMILIES
     root = a.data / "development"
     work = a.data / ("stage5" if a.release else "stage3" if a.addons else "stage0")
     if languages == ["en"]:
         work = work.with_name(work.name + ("-en-subset" if a.subset else "-en"))
     if a.voices == "ecapa":
-        work = work.with_name(work.name + "-ecapa" + ("-xtts" if a.xtts_only else ""))
+        work = work.with_name(
+            work.name + "-ecapa" + ("-xtts" if a.xtts_only else "")
+            + (f"-{a.treatment}" if a.treatment else "")
+        )
     elif languages != ["en", "hi"]:
         raise SystemExit("Hindi-only runs are not supported; English is always required")
     if a.action == "proof":
@@ -241,6 +272,22 @@ def main():
         return
     work.mkdir(parents=True, exist_ok=True)
     shared = a.data / "stage0"
+    crops = frozen = None
+    if a.crop_cache:
+        from .en_treatment import load_cache
+
+        crops = (a.crop_cache, load_cache(a.crop_cache, a.data))
+    if a.treatment:
+        from .en_treatment import BASE, frozen_treatment
+
+        frozen = frozen_treatment(a.data)
+        if frozen["treatment"] != a.treatment:
+            raise SystemExit(f"Only the frozen treatment {frozen['treatment']} may be audited")
+        original = json.loads((a.data / BASE / "prep-audit.json").read_text())
+        if not (work / "selection.csv").exists():
+            (work / "selection.csv").write_bytes((a.data / BASE / "selection.csv").read_bytes())
+        if digest(work / "selection.csv") != original["selection_sha256"]:
+            raise ValueError("Treated run must reuse the original selection exactly")
     if a.action == "inventory":
         write_csv(shared / "inventory.csv", inventory(root, real_glob=a.real_glob))
     elif a.action in {"match", "jobs"}:
@@ -305,15 +352,16 @@ def main():
         if diag:
             write_csv(work / "mlaad-diagnostic.csv", diag)
     elif a.action == "audit":
-        audit_selection(root, work, languages, train_need)
+        audit_selection(root, work, languages, train_need, a.treatment, crops, frozen)
     elif a.action == "catalog":
-        catalog(root, work, languages)
+        catalog(root, work, languages, a.treatment, crops)
     else:
         report = json.loads((work / "prep-audit.json").read_text())
         rows = read(work / "catalog.csv")
         eligible = read(work / "eligible.csv")
         if (
-            report.get("policy") != POLICY
+            (report.get("treatment") or {}).get("treatment") != a.treatment
+            or report.get("policy") != POLICY
             or report.get("languages_audited") != languages
             or not report["pass"]
             or digest(work / "eligible.csv") != report["eligible_sha256"]
