@@ -1,5 +1,11 @@
 # Pipeline v3 handoff for Claude
 
+## Day-target-1 (24-hour English detection, `23_ONE_DAY_DETECTION_HANDOFF.md`): log
+
+- **25 Nov 2026, 23:33 IST: acknowledged** by Claude. Owner of the run through 26 Nov 23:20 IST. Code `3906c8b` (89 local tests pass).
+- **Session:** existing T4 `v3-t4p` (1.24 CU/h), Drive mounted, GPU idle at start (0 MiB), no pipeline process running. Another `colab ssh` client holds the runtime's single SSH slot, so this run drives the VM via `colab exec` only and does not touch other directories. The A100 and V2-L stay as they are; V2-L checkpoint, V1 pack, pilot and thresholds are read-only for this run.
+- **Writer:** one, this job, only under `MyDrive/audio-v3/v2/day-target-1/`. Balance at start 151.43 CU.
+
 ## Status 25 Nov 2026, 23:06 IST (Claude)
 
 **Sessions:**
