@@ -38,3 +38,4 @@ def test_treatments_reencode():
     for name in ("crop", "crop_norm", "crop_norm_lp7k"):
         assert probe(treat(b, name))["codec"] == "pcm_s16le"
     assert probe(treat(b, "crop_norm_opus"))["codec"] == "opus"
+    assert probe(treat(b, "active_norm"))["codec"] == "pcm_s16le"

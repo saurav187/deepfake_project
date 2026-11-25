@@ -12,6 +12,9 @@ treatments applied identically to both labels:
   crop_norm             crop, then unit-RMS level as the model input normalises it
   crop_norm_lp7k        crop_norm + shared 7 kHz low-pass (bandwidth equalisation)
   crop_norm_opus        crop_norm + Opus 16 kb/s VoIP
+  active_norm           trimmed span, the 4 s window with the MOST active 10 ms frames (same
+                        rule for both labels), unit level: tests whether speech_ratio is a
+                        window-placement artefact
 The crop_* treatments approximate what the model receives; the first three describe storage.
 
 Pair IDs and folds are preserved; probes are fitted on train and scored on select.
@@ -76,9 +79,36 @@ def _wav(x):
     return buf.getvalue()
 
 
+def _active_window(x):
+    """Trim like the pipeline, then take the 4 s window with the most active 10 ms frames."""
+    import numpy as np
+
+    from .audio import WINDOW, prepare
+
+    t, _ = prepare(x)
+    if len(t) < WINDOW:
+        raise ValueError("shorter than the 4 s crop")
+    hop = 160
+    n = len(t) // hop
+    frames = np.sqrt(np.mean(t[: n * hop].reshape(n, hop) ** 2, axis=1))
+    active = (frames > max(0.001, 0.03 * np.max(np.abs(t)))).astype(float)
+    w = WINDOW // hop
+    if n <= w:
+        return t[:WINDOW]
+    best = int(np.argmax(np.convolve(active, np.ones(w), "valid")))
+    return t[best * hop : best * hop + WINDOW]
+
+
 def treat(b, name):
     if name == "baseline":
         return b
+    if name == "active_norm":
+        import numpy as np
+
+        from .audio import decode
+
+        x = _active_window(decode(b))
+        return _wav(0.05 * x / max(float(np.sqrt(np.mean(x**2))), 1e-6))
     if name in MODEL_VIEW:
         import numpy as np
 
@@ -120,7 +150,10 @@ def choose(rows, per_split):
     return [x for split in ("train", "select") for pair in picked[split] for x in pair]
 
 
-def run(data, per_split, base):
+ALL_TREATMENTS = ("baseline", *TREATMENTS, *MODEL_VIEW, "active_norm")
+
+
+def run(data, per_split, base, treatments=ALL_TREATMENTS):
     root = data / "development"
     with (root / base).open() as f:
         rows = choose(list(csv.DictReader(f)), per_split)
@@ -160,7 +193,7 @@ def run(data, per_split, base):
             "Provenance fields (source/pair) are excluded from these acoustic panels.",
         ],
     }
-    for name in ("baseline", *TREATMENTS, *MODEL_VIEW):
+    for name in treatments:
         feats, kept = [], []
         for r in rows:
             try:
@@ -185,8 +218,9 @@ def main():
     p.add_argument("--pairs", type=int, default=150, help="matched pairs per fold (train, select)")
     p.add_argument("--base", default="selection_v0_english_thin.csv")
     p.add_argument("--out", default="stage0/codec_probe_hi.json")
+    p.add_argument("--treatments", nargs="+", default=list(ALL_TREATMENTS), choices=ALL_TREATMENTS)
     a = p.parse_args()
-    result = run(a.data, a.pairs, a.base)
+    result = run(a.data, a.pairs, a.base, a.treatments)
     out = a.data / a.out
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2, default=str))
