@@ -5,9 +5,9 @@
 
 *Live section, updated during the night. MEASURED = observed on the owner's Colab/Drive; PROJECTED = estimate.*
 
-**State at last update (22:50 UTC / 04:20 IST):** Stage 1 chain running on the existing CPU-only `v3-data` session (2 vCPU, 12 GB RAM, 0.08 CU/h, Drive mounted at `/content/drive`). Inventory DONE; `wavlm-sv` present; **voice labelling RUNNING** (XTTSv2 ≥512/28,539 at 22:45 UTC). Codec probe v1 DONE; extended probe v2 (model-view treatments) running at nice 15.
+**State at last update (01:00 UTC / 06:30 IST, 25 Nov):** Stage 1 chain healthy on the CPU-only `v3-data` session. **Last completed stage: inventory** (+ `wavlm-sv` download). **Voice labelling RUNNING** — 3,083 XTTSv2 embeddings committed at 00:57 UTC; clean rate ~1,600–1,700 clips/h; **~50 h remain on CPU, so it cannot finish in this session** (recommend finishing on a GPU session; commands under "Next steps"). **match → audit → catalog → pack were NOT run** (they need the finished voice labels). Hindi codec probes v1–v3 done: **Hindi fails the acoustic gate on `speech_ratio` ≈ 0.72–0.73** in every treatment tested; English cannot be audited until voice labels exist. A local watchdog checks every 10 min and resumes the job once if it stops; nothing else is scheduled.
 
-**Code:** branch `pipeline-v3-scratch`; remote bundle = `bdfac3a` + Option A files (`audit.py`, `cli.py`, `stage0.py`, `codec_probe.py` from local commit `3cf1eca` and the uncommitted codec probe). Nothing pushed.
+**Code:** branch `pipeline-v3-scratch`, local commits `3cf1eca` (Option A audit) → `0a746ad`/`57b8851`/`2545ee9` (codec probe) → handoff commits; nothing pushed. Remote `/content/v3-src` = bundle `bdfac3a` plus uploaded `audit.py`, `cli.py`, `stage0.py`, `codec_probe.py` from these commits (voice labelling runs the unchanged `bdfac3a` code). Tests: 59 pass locally.
 
 **What was done**
 1. Refreshed `/content/v3-src` from `bdfac3a` (copy also at `MyDrive/audio-v3/v3-code.tar`); Colab already satisfies `requirements-colab.txt` (transformers 5.22.1, huggingface-hub 1.33.0, pyarrow 23.0.1).
