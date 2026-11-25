@@ -94,7 +94,7 @@
 - **Remaining blockers:**
   - Independent panel and real calls: unmeasured.
   - Bounded training comparison: no separately audited broader training subset is ready yet. The modern-data intake has staged nothing for training.
-  - ElevenLabs-v3 and Gemini-3.1-Flash need training data from modern generators. No threshold change on the existing models can reach 80% at ≤2% FA.
+  - ElevenLabs-v3 and Gemini-3.1-Flash need training data from modern generators. Lowering the cutoff on this panel was not tested, because that would select the operating point on the evaluation recordings.
 - **Fallback prepared** (`pipeline_v3/day_fallback.py`, CPU smoke test passed):
   - **Model:** the released three-head detector v1, frozen. Release `bdb7748c`, XLS-R 300M, heads with seeds 42/43/44, threshold p ≥ 0.5623. That threshold was set on dev for a 5% false-alarm and 5% miss budget, not 2%.
   - **Trials:** the same (id, channel) trials as `day_target evaluate`.
