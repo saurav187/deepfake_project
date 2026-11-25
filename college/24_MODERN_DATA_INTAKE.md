@@ -1,5 +1,12 @@
 # Claude assignment for modern audio intake
 
+## Owner update — modern TTS first, 26 November
+
+Prioritize clean modern TTS. The V2 target is at least 70% detection on each of Gemini, ElevenLabs, FishTTS and Chatterbox at one shared cutoff, with at most 15% of genuine clips flagged. Report pooled detection and raw counts per family. Run `python3 -m pipeline_v3.modern_tts_target --data "$D"` for a diagnostic at the 15% limit and the false-alarm cost of 70% detection on the existing panel. Apply the same analysis to the fallback when its scores are complete. Choose a deployment candidate's cutoff on separate calibration data and freeze it before testing on independent speakers and prompts. Treat the earlier 2% and 5% results as historical comparisons.
+
+Give training-eligible matched modern TTS and genuine controls first claim on new training time. Reserve modern generator families, or when deliberately training on familiar families, reserve speakers, prompts and versions and label familiarity. Focus on Fish and Chatterbox while tracking regressions on Gemini and ElevenLabs. Defer call, Hindi and vocoder expansion until after this milestone. Continue already-running jobs and preserve their outputs.
+
+
 Deadline 26 November 2026, 23:20 IST. Work in parallel with the existing day-target experiment. Use a separate intake directory and writer, and give the existing GPU scorer priority. Start downloading and preprocessing public research audio now. The deliverable is usable processed audio with lineage and a measured eligibility report. Log the first completed shard, eligible parents and speakers, then send the one-day operator its path and decision. Keep research-only assets identified.
 
 ## First deliverable — matched modern cloning

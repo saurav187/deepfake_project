@@ -1,6 +1,13 @@
 # Claude assignment — 24-hour English detection experiment
 
-Own execution through **26 November 2026, 23:20 IST**. The owner prioritizes 80% detection. Use the proposed operational target of at least 80% for each of the four MLAAD generators at no more than 2% genuine false alarms, reporting clean, Opus and simulated phone separately. Give the clean result first. This is a development benchmark on three genuine source readers. Independent confirmation and actual calls are separate outcomes. A missed target is a valid result. Report the achieved operating point and raw counts by the deadline.
+## Owner update — modern TTS first, 26 November
+
+Prioritize clean modern TTS. The V2 target is at least 70% detection on each of Gemini, ElevenLabs, FishTTS and Chatterbox at one shared cutoff, with at most 15% of genuine clips flagged. Report pooled detection and raw counts per family. Run `python3 -m pipeline_v3.modern_tts_target --data "$D"` for a diagnostic at the 15% limit and the false-alarm cost of 70% detection on the existing panel. Apply the same analysis to the fallback when its scores are complete. Choose a deployment candidate's cutoff on separate calibration data and freeze it before testing on independent speakers and prompts. Treat the earlier 2% and 5% results as historical comparisons.
+
+Give training-eligible matched modern TTS and genuine controls first claim on new training time. Reserve modern generator families, or when deliberately training on familiar families, reserve speakers, prompts and versions and label familiarity. Focus on Fish and Chatterbox while tracking regressions on Gemini and ElevenLabs. Defer call, Hindi and vocoder expansion until after this milestone. Continue already-running jobs and preserve their outputs.
+
+
+Own execution through **26 November 2026, 23:20 IST**. Use the updated modern TTS target above. Report clean first, with Opus and simulated phone as secondary results. This is a development benchmark on three genuine source readers. Independent confirmation and actual calls are separate outcomes. A missed target is a valid result. Report the achieved operating point and raw counts by the deadline.
 
 ## Start now
 
