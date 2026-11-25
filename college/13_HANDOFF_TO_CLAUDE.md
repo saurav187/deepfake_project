@@ -1,5 +1,9 @@
 # Pipeline v3 handoff for Claude
 
+## Dataset acquisition research — 25 November 2026
+
+[Ranked candidates and dry-run commands](20_DATASET_CANDIDATES.md). LibriSeVoc offers six reconstructions per genuine parent but requires LibriSpeech ancestry clearance. The bounded CodecFake intake costs 0.487 GB. Indic-CodecFake is the closest Hindi design; full release access and per-fold Hindi reader counts remain unverified. Public download plans are offline in `pipeline_v3.fetch_candidates`. No transfer, generation or Colab session was started. English remains blocked at the failed audit.
+
 ## English XTTS-only treated run (Option A): formal audit FAILED (25 Nov 2026, Claude)
 
 **Last completed stage:** the frozen-treatment formal audit, which failed. Catalog, pack, staging, the pilot and Teacher V1 did not run. **The A100 was released at 10:40:15 UTC.** No threshold or gate was changed, and no runner-up treatment was tried on select.
