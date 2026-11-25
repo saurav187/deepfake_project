@@ -269,9 +269,56 @@ def crossfit(rows):
     }
 
 
+# ---------------------------------------------------- off-panel genuine calibration
+def libri_genuine(root, release_json):
+    """Teacher + release p on the 841 libri-dev genuine clips (73 LibriSpeech speakers)."""
+    rel = json.loads(Path(release_json).read_text())["scores"]
+    rows = []
+    with (root / TEACHER_CSV).open() as f:
+        for r in csv.DictReader(f):
+            if r["panel"].startswith("libri-dev") and r["channel"] == "clean":
+                rows.append({"id": r["id"], "reader": r["speaker"], "panel": r["panel"],
+                             "teacher": float(r["p"]), "release": float(rel[r["id"]]["p"]),
+                             "label": 0, "family": "genuine"})
+    if len(rows) != len(rel):
+        raise ValueError("libri-dev teacher/release rows do not align")
+    return rows
+
+
+def offpanel(rows, libri, frozen):
+    """Cutoff = lowest with <=15% of libri-dev genuine flagged; applied unchanged to MLAAD dev.
+
+    Also the reverse: MLAAD-dev 15% cutoffs applied to libri-dev genuine."""
+    st = {m: (frozen["normaliser"][m]["mu"], frozen["normaliser"][m]["sd"]) for m in ("release", "teacher")}
+    w = frozen["weight_release"]
+    scorers = {
+        "combined_zmean": lambda r: combined(r, st, w),
+        "release": lambda r: r["release"],
+        "teacher": lambda r: r["teacher"],
+    }
+    out = {"libri_genuine": len(libri), "libri_speakers": len({r["reader"] for r in libri})}
+    for name, f in scorers.items():
+        c = cutoff_at_fa([f(r) for r in libri])
+        cm = cutoff_at_fa([f(r) for r in rows if r["label"] == 0])
+        out[name] = {
+            "cutoff_from_libri_15": c,
+            "libri_flagged": sum(f(r) >= c for r in libri),
+            "mlaad_dev_at_libri_cutoff": table(rows, lambda r: f(r) >= c),
+            "mlaad_dev_at_libri_cutoff_by_reader": {
+                k: table([r for r in rows if r["reader"] == k], lambda r: f(r) >= c)["genuine"]
+                for k in sorted({r["reader"] for r in rows})
+            },
+            "mlaad_cutoff_15_in_sample": cm,
+            "libri_flagged_at_mlaad_cutoff": sum(f(r) >= cm for r in libri),
+        }
+    return out
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("phase", choices=["overlap", "crossfit", "all"])
+    p.add_argument("phase", choices=["overlap", "crossfit", "offpanel", "all"])
+    p.add_argument("--libri-release", type=Path, help="output of modern_tts_70_at_15_libri")
+    p.add_argument("--frozen", type=Path, help="frozen-candidate.json")
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--out", type=Path)
     p.add_argument("--view", default="paired", choices=["paired", "full"])
@@ -289,6 +336,15 @@ def main():
         "readers": dict(Counter(r["reader"] for r in rows)),
     }
     phases = ["overlap", "crossfit"] if a.phase == "all" else [a.phase]
+    if a.phase == "offpanel":
+        prov["libri_release_sha256"] = sha(a.libri_release)
+        prov["frozen_candidate_sha256"] = sha(a.frozen)
+        res = {"provenance": prov,
+               **offpanel(rows, libri_genuine(a.data, a.libri_release), json.loads(a.frozen.read_text()))}
+        path = out / f"offpanel-{a.view}.json"
+        path.write_text(json.dumps(res, indent=2) + "\n")
+        print(f"wrote {path}")
+        return 0
     for ph in phases:
         res = {"provenance": prov, **(overlap(rows) if ph == "overlap" else crossfit(rows))}
         path = out / f"{ph}-{a.view}.json"
