@@ -18,11 +18,7 @@ from .data import digest, entries, payload
 from .metrics import bootstrap, metrics, slices
 
 
-def cache(cfg, rows, encoder, tag):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = (
-        AutoModel.from_pretrained(str(encoder), local_files_only=True).to(device).eval()
-    )
+def cache_directory(cfg, encoder, tag):
     signature = hashlib.sha256(
         (
             (
@@ -35,7 +31,13 @@ def cache(cfg, rows, encoder, tag):
             + "v3-pool-3"
         ).encode()
     ).hexdigest()[:16]
-    directory = cfg.data / "features" / tag / signature
+    return cfg.data / "features" / tag / signature
+
+
+def cache(cfg, rows, encoder, tag):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = AutoModel.from_pretrained(str(encoder), local_files_only=True).to(device).eval()
+    directory = cache_directory(cfg, encoder, tag)
     directory.mkdir(parents=True, exist_ok=True)
     features = {}
     with torch.inference_mode():
@@ -81,7 +83,7 @@ def cache(cfg, rows, encoder, tag):
     return features
 
 
-def pilot(cfg):
+def sample_rows(cfg):
     rng = np.random.default_rng(cfg.seed)
     languages = tuple(getattr(cfg, "languages", ("en", "hi")))
     allrows = entries(cfg.local, {"train", "select"})
@@ -141,6 +143,11 @@ def pilot(cfg):
                 rows.extend(
                     rest[i] for i in rng.permutation(len(rest))[: limit - len(used)]
                 )
+    return rows, languages, holdout
+
+
+def pilot(cfg):
+    rows, languages, holdout = sample_rows(cfg)
     report = {
         "languages": list(languages),
         "probe_holdout": sorted(holdout),
