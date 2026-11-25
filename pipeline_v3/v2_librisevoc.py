@@ -112,14 +112,23 @@ def sample(rows, train_readers, readers=READERS, per_reader=PER_READER):
     return [r for r in rows if r["parent"] in parents]
 
 
+_ZIP = {}
+
+
+def _zip(path):
+    """One open ZIP (one central-directory read) per worker process."""
+    if path not in _ZIP:
+        _ZIP[path] = zipfile.ZipFile(path)
+    return _ZIP[path]
+
+
 def _work(args):
     zpath, scratch, r = args
     from .audio import fixed_crop
     from .audit import PROVENANCE_FIELDS, descriptors
     from .en_treatment import apply
 
-    with zipfile.ZipFile(zpath) as z:
-        b = z.read(r["member"])
+    b = _zip(zpath).read(r["member"])
     local = Path(scratch) / (r["id"].replace("/", "__") + ".wav")
     local.write_bytes(b)
     crop = fixed_crop(b)
@@ -144,7 +153,9 @@ def diagnose(data, scratch, workers=None):
     v1 = read(data / "stage0-en-ecapa-xtts" / "selection.csv")
     train_readers = {r["speaker"] for r in v1 if r["split"] == "train" and r["label"] == "0"}
     picked = sample(rows, train_readers)
-    need = sum(zipfile.ZipFile(data / ZIP).getinfo(r["member"]).file_size for r in picked)
+    z = zipfile.ZipFile(data / ZIP)
+    need = sum(z.getinfo(r["member"]).file_size for r in picked)
+    print(f"sample {len(picked)} clips, {need/1e9:.2f} GB to extract", flush=True)
     probe = scratch
     while not probe.exists():
         probe = probe.parent
@@ -158,7 +169,7 @@ def diagnose(data, scratch, workers=None):
     with ProcessPoolExecutor(workers) as ex:
         for i, (rid, f) in enumerate(ex.map(_work, [(str(data / ZIP), str(scratch), r) for r in picked], chunksize=8), 1):
             feats[rid] = f
-            if i % 200 == 0 or i == len(picked):
+            if i % 100 == 0 or i == len(picked):
                 rate = i / (time.time() - t0)
                 print(f"PROGRESS {i}/{len(picked)} clips {rate:.2f}/s", flush=True)
     elapsed = time.time() - t0
