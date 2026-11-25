@@ -18,6 +18,14 @@
   - 23:44 IST: one observer poll failed on a local network error. No effect on the run.
 - **Pilot replay passed** (about 23:50 IST): fit got past the EER reproduction check against `pilot.json` and loaded WavLM for the calibrate and threshold cutoffs.
 - **23:55 IST, parallel job:** "modern-data intake" (`college/24_MODERN_DATA_INTAKE.md` @`95daceb`) is the sole writer of `development/modern-intake/`. It runs on its own CPU session `intake-cpu` and does not touch `v3-t4p`, `day-target-1`, the clip cache, V1 or V2-L. It has been asked to keep Drive I/O moderate until evaluate ends. Before any broader-data manifest enters this run it needs a separate audit, verified labels, overlap checks against the V1 held-out readers and the MLAAD panel readers, A08 excluded, no sealed data, and per-reader counts, plus explicit agreement.
+- **Candidate freeze, 00:02:44 IST** (fit exit 0, 29 min).
+  - **Record:** `frozen.json` sha256 `7fd02ac1…7b29`, frozen before any outside scoring.
+  - **Primary:** **`clean_opus`**, the head fitted on the original and Opus views of the same 2,000 pilot training clips. Its cutoff is **−4.333** decision logit, the max over clean, Opus and phone of the 2% cutoff on threshold-fold genuine audio.
+  - **Original pilot head `clean`:** cutoff −3.942.
+  - **Pilot replay:** n=375, AUC 1.000, EER 0.000. This is the unseen-domain (Chatterbox) select slice, reproduced against `pilot.json`.
+  - **Select at the calibrate cutoffs:** both heads catch 100% of select XTTS and Chatterbox in the clean and Opus views. Genuine false alarms are above the 2% budget for both: `clean` 4.0%, `clean_opus` 3.6%. `clean_opus` won on the false-alarm criterion.
+  - **Caveat:** a perfect select score is consistent with the known PhonemeDF shortcut (band-limited, darker fakes; failed audit `exploratory-failed-audit-v1`). Outside MLAAD scoring is the real test.
+- **Evaluate** started 00:02:44 IST.
 - **Fallback prepared** (`pipeline_v3/day_fallback.py`, CPU smoke test passed):
   - **Model:** the released three-head detector v1, frozen. Release `bdb7748c`, XLS-R 300M, heads with seeds 42/43/44, threshold p ≥ 0.5623. That threshold was set on dev for a 5% false-alarm and 5% miss budget, not 2%.
   - **Trials:** the same (id, channel) trials as `day_target evaluate`.
