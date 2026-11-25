@@ -25,7 +25,29 @@
   - **Pilot replay:** n=375, AUC 1.000, EER 0.000. This is the unseen-domain (Chatterbox) select slice, reproduced against `pilot.json`.
   - **Select at the calibrate cutoffs:** both heads catch 100% of select XTTS and Chatterbox in the clean and Opus views. Genuine false alarms are above the 2% budget for both: `clean` 4.0%, `clean_opus` 3.6%. `clean_opus` won on the false-alarm criterion.
   - **Caveat:** a perfect select score is consistent with the known PhonemeDF shortcut (band-limited, darker fakes; failed audit `exploratory-failed-audit-v1`). Outside MLAAD scoring is the real test.
-- **Evaluate** started 00:02:44 IST.
+- **Evaluate:** exit 0, 00:02:44–00:29:48 IST (27 min). All 1,398 recordings scored, CHAIN_DONE. `result.json` sha256 `7b3bee4f…69ad`. Bound to frozen `7fd02ac1…`, teacher scores `240f22bf…`, teacher freeze `43ff0c1c…`.
+
+  **Primary result: target NOT met.** No generator reaches 80% on any channel. This is a development panel of 3 genuine M-AILABS readers, and every cell has those 3 readers. Opus and phone are simulated channels.
+
+  Detection is flagged/clips. Genuine FA is the false-alarm rate.
+
+  | Model (cutoff) | Channel | Genuine FA | Chatterbox | ElevenLabs-v3 | FishTTS | Gemini-3.1-Flash |
+  |---|---|---|---|---|---|---|
+  | **clean_opus, primary (−4.333)** | **clean** | **13/697 (1.9%)** | **10/166 (6.0%)** | **40/181 (22.1%)** | **15/173 (8.7%)** | **8/181 (4.4%)** |
+  | | opus | 16/697 (2.3%) | 10/166 (6.0%) | 42/181 (23.2%) | 17/173 (9.8%) | 5/181 (2.8%) |
+  | | phone | 15/697 (2.2%) | 9/166 (5.4%) | 39/181 (21.5%) | 17/173 (9.8%) | 3/181 (1.7%) |
+  | clean, original pilot (−3.942) | clean | 11/697 (1.6%) | 9/166 (5.4%) | 41/181 (22.7%) | 9/173 (5.2%) | 10/181 (5.5%) |
+  | | opus | 14/697 (2.0%) | 9/166 (5.4%) | 42/181 (23.2%) | 12/173 (6.9%) | 7/181 (3.9%) |
+  | | phone | 15/697 (2.2%) | 8/166 (4.8%) | 37/181 (20.4%) | 11/173 (6.4%) | 6/181 (3.3%) |
+  | teacher V1 (0.907) | clean | 3/697 (0.4%) | 1/166 (0.6%) | 29/181 (16.0%) | 3/173 (1.7%) | 34/181 (18.8%) |
+  | | opus | 8/697 (1.1%) | 1/166 (0.6%) | 31/181 (17.1%) | 1/173 (0.6%) | 28/181 (15.5%) |
+  | | phone | 4/697 (0.6%) | 4/166 (2.4%) | 32/181 (17.7%) | 1/173 (0.6%) | 60/181 (33.1%) |
+
+  - **Clean-only:** the target is also missed for all four generators. The best clean cell is ElevenLabs-v3 at 22.1%.
+  - **False alarms:** the primary's genuine FA on outside data is 1.9% clean but **exceeds 2%** on simulated Opus (2.3%) and phone (2.2%). So even its realised operating point misses the strict budget on two channels.
+  - **Compared with teacher V1:** the primary catches more Chatterbox and Fish, catches about as many ElevenLabs, and catches far fewer Gemini. It also raises false alarms roughly 4×.
+  - **Reading:** the frozen-feature heads separate PhonemeDF XTTS/Chatterbox perfectly (select AUC 1.0) but do not transfer to the MLAAD generators. This is consistent with the known PhonemeDF bandwidth shortcut.
+- **Fallback started** 00:30:45 IST: frozen release v1 on the same trials (see below).
 - **Fallback prepared** (`pipeline_v3/day_fallback.py`, CPU smoke test passed):
   - **Model:** the released three-head detector v1, frozen. Release `bdb7748c`, XLS-R 300M, heads with seeds 42/43/44, threshold p ≥ 0.5623. That threshold was set on dev for a 5% false-alarm and 5% miss budget, not 2%.
   - **Trials:** the same (id, channel) trials as `day_target evaluate`.
