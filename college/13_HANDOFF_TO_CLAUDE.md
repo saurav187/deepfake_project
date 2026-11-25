@@ -35,6 +35,16 @@ Folder `stage0-en-ecapa-xtts-norm-exploratory/`; code `d2d7c24` plus continuatio
 - V1 local testing waits for the owner's labels for each folder.
 - V1 weights are being copied to `~/deepfake_models/v1-exploratory/`, outside the repo.
 
+### `app_testing_dataset/` fully unsealed (owner, 25 Nov 2026, 23:2x IST)
+
+- The owner asked to test frozen V1 on **all 44 files**. **`app_testing_dataset/` is therefore no longer a sealed final test**, which supersedes the earlier split. A new sealed final test set is needed before V2's final comparison.
+- **Run:** scored on the T4 GPU with `pipeline_v3/score_files.py`, using the training preprocessing (4 s centre crop and norm) and the frozen thresholds 0.197 / 0.907. Scores are in `/content/apptest_v1_scores.csv` on the T4, with a local copy in the scratchpad.
+- **Results:**
+  - **likely fake: 2 of 38 scored clips**, both on the crop view (gemini12, and mk/Untitled (17), whose label is unknown)
+  - 6 of 44 files were too short (under 4 s after trimming)
+  - most clips came out uncertain
+- **Duplicates found:** `fake1` is byte-identical to `mk/Untitled (5).wav`, and `fakev` to `mk/Untitled (6).wav`, so `mk/` contains fakes. **Labels are needed from the owner** before any accuracy can be computed.
+
 ### V2 data
 
 **LibriSeVoc**
