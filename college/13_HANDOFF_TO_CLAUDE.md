@@ -5,7 +5,7 @@
 
 *Live section. MEASURED = observed on Colab/Drive. Start 08:18 IST (02:48 UTC).*
 
-**State (04:20 UTC / 09:50 IST): STOPPED at English match. Failed gate: `stage0.viable()`, "Missing English generator cell in train". Train has XTTS-v2 but no MeloTTS.** Last completed stage: **ECAPA voice labels (full)**. Audit, catalog, pack, pilot and Teacher V1 were **not run**. No threshold was changed. Student deferred. The T4 is released once the ECAPA MeloTTS embeddings (cached for the owner's decision) are on Drive.
+**State (04:20 UTC / 09:50 IST): STOPPED at English match. Failed gate: `stage0.viable()`, "Missing English generator cell in train". Train has XTTS-v2 but no MeloTTS.** Last completed stage: **ECAPA voice labels (full)**. Audit, catalog, pack, pilot and Teacher V1 were **not run**. No threshold was changed. Student deferred. **T4 `v3-gpu` released 04:20 UTC (09:50 IST)** after the ECAPA MeloTTS embeddings were cached (28,539, 70.7 clips/s). **Compute: balance 198.10 → 196.15 CU = 1.95 CU this run** (T4 ~1.5 h). `v3-data` (CPU, 0.08 CU/h) is still up.
 
 **Why train has no MeloTTS (MEASURED):** the Melo built-in-voice cohort rule (`voice_labels.py`) only clusters clips whose max WavLM cosine to every VCTK reference is < 0.65, needs ≥ 50 such clips, then requires cluster cosine ≥ 0.88. Under WavLM-SV the Melo max-reference cosine has p1 0.682, p5 0.705, median 0.837, p95 0.95. Only **0.05% (≈15 clips) fall below 0.65**, so no clustering runs and **all 28,539 Melo labels are `unknown`**. This is the same WavLM score-scale problem as the 0.86 floor, now in the cohort constants (0.65 / 0.80 / 0.88). The owner approved an ECAPA rule for *VCTK target* acceptance only and said to keep WavLM's Melo results, so I did not invent an ECAPA cohort rule.
 
@@ -20,6 +20,21 @@
 | validate | 559 / 29 | 300 / 29 / 1 (p254) | 313 / 29 / 1 |
 
 Every reader and voice minimum holds. The only failing cell is MeloTTS in train. ECAPA acceptance (whole corpus): XTTS-v2 15,924/28,539 (55.8%; strict 0.69 floor 30.2%); Chatterbox 23,329/28,539 (81.7%; strict 64.7%). Details: `MyDrive/audio-v3/stage0-ecapa/label-report-full.json`, `voices.csv`; failing match log `MyDrive/audio-v3/stage0-en-ecapa/match-FAILED.log`.
+
+**Drive artifacts:** `MyDrive/audio-v3/stage0-ecapa/` (rule.json, refs-report.json, label-report-{sample,full}.json, descriptive-argmax.json, voices.csv, sv-ecapa.sqlite with all 4 groups complete); `stage0/` (WavLM sv.sqlite complete, voices.csv, hindi_density.json); `stage0-en-ecapa/match-FAILED.log`.
+
+**Resume after the owner's choice:** a new T4 with Drive mounted (`colab new -s v3-gpu --gpu T4`, then `colab drivemount -s v3-gpu` and press Enter after granting). Upload the code (`git archive HEAD pipeline_v3`). Then on the VM, with the Drive tree directly (no symlinks needed):
+```bash
+cd /content/v3-src; D=/content/drive/MyDrive/audio-v3
+python3 -m pipeline_v3.stage0 match   --data $D --languages en --voices ecapa
+python3 -m pipeline_v3.stage0 audit   --data $D --languages en --voices ecapa
+python3 -m pipeline_v3.stage0 catalog --data $D --languages en --voices ecapa
+python3 -m pipeline_v3.stage0 pack    --data $D --languages en --voices ecapa
+python3 -m pipeline_v3.cli stage --data $D/stage0-en-ecapa --packed $D/stage0-en-ecapa/packed --local /content/v3-local-en --splits train select
+python3 -m pipeline_v3.cli pilot --data $D/stage0-en-ecapa --local /content/v3-local-en --encoder $D/models/xlsr --small-encoder $D/models/wavlm-base --languages en
+python3 -m pipeline_v3.cli teacher --data $D/stage0-en-ecapa --local /content/v3-local-en --encoder $D/models/xlsr   # only runs if pilot go
+```
+(For option (a), first add and freeze the ECAPA Melo cohort rule, then rerun `voice_ecapa label`.)
 
 **Owner decision needed (pick one, then resume):**
 - (a) Approve an **ECAPA Melo cohort rule** defined like the target rule, from reference trials: a Melo clip joins the train-only cohort only if the frozen ECAPA rule assigns it **no** VCTK voice (both windows below floor 0.64 or margin < 0.08), with cluster constants re-derived on ECAPA scale. The ECAPA Melo embeddings are already cached, so this is about 5 min of CPU plus the chain (~30–60 min including the pilot).
