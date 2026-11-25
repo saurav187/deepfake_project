@@ -4,6 +4,53 @@
 
 [Ranked candidates and dry-run commands](20_DATASET_CANDIDATES.md). LibriSeVoc offers six reconstructions per genuine parent but requires LibriSpeech ancestry clearance. The bounded CodecFake intake costs 0.487 GB. Indic-CodecFake is the closest Hindi design; full release access and per-fold Hindi reader counts remain unverified. Public download plans are offline in `pipeline_v3.fetch_candidates`. No transfer, generation or Colab session was started. English remains blocked at the failed audit.
 
+## English audit failure analysis: XTTS vs Chatterbox (25 Nov 2026, Claude; CPU work on one T4)
+
+**This is an explanation of the completed frozen-norm audit, not a gate or a retry.** English stays blocked. No generator was dropped, no treatment was tried on select, and nothing was trained.
+
+- **What was saved before:** only aggregate AUCs (`prep-audit.json`), with no per-clip descriptors or scores. So per-clip values were recovered as follows:
+  - Rebuilt the crop cache: 10,433 crops, verified against the original `eligible.csv`.
+  - Applied the frozen `norm` and checked every treated sha256 against the audited `stage0-en-ecapa-xtts-norm/eligible.csv`.
+  - Refitted the probes exactly as `audit.fit_controls` does, on the same train rows, features and order.
+  - **The overall select AUCs reproduce `prep-audit.json` exactly** (tolerance 1e-9): upper_band 0.817, rolloff 0.779, tilt 0.758, speech_ratio 0.659, joint 0.758.
+- **Session:** T4 `v3-t4` (2 vCPU), displayed 1.24 CU/h, 16:17–17:32 IST.
+  - Cache 16:22–16:46 IST, at about 7 crops/s.
+  - Scoring 16:46–17:31 IST, 7,256 clips at a measured 2.7 clips/s.
+  - **CU used:** 184.93 → 183.44 = **1.49 CU**. The T4 was released at 17:32 IST.
+- **Code:** `957e3be`, `pipeline_v3/audit_explain.py` plus `audit.probe_scores`. `fit_controls` behaviour is unchanged and the tests pass.
+- **Select comparisons** use the same train-fitted probes, AUC with fakes as the positive class. Every value is above 0.5, so it is also the oriented AUC.
+
+  | Comparison | Fakes | Genuine parents | Readers | upper_band | rolloff | tilt | speech_ratio | joint |
+  |---|---|---|---|---|---|---|---|---|
+  | XTTS vs own parents | 645 | 645 | 44 | 0.828 | 0.847 | 0.851 | 0.748 | **0.868** |
+  | Chatterbox vs own parents | 819 | 819 | 44 | 0.817 | 0.723 | 0.686 | 0.598 | **0.680** |
+  | XTTS, shared parents | 160 | 160 | 32 | 0.862 | 0.856 | 0.869 | 0.760 | **0.890** |
+  | Chatterbox, shared parents | 160 | 160 | 32 | 0.858 | 0.767 | 0.727 | 0.641 | **0.744** |
+
+  Shared parents means a genuine select utterance that has both an XTTS and a Chatterbox fake: 160 parents from 32 readers.
+- **Mean descriptors** (normalised crops):
+
+  | Group | upper_band (>4 kHz) | rolloff (Hz) | tilt (<1 kHz) | speech_ratio |
+  |---|---|---|---|---|
+  | train genuine | 0.0370 | 2,507 | 0.818 | 0.632 |
+  | train XTTS (4 voices) | 0.0165 | 1,779 | 0.913 | 0.689 |
+  | select genuine | 0.0307 | 2,358 | 0.828 | 0.632 |
+  | select XTTS (2 select-only voices) | 0.0041 | 1,024 | 0.948 | 0.724 |
+  | select Chatterbox | 0.0040 | 1,269 | 0.916 | 0.666 |
+
+- **What the evidence supports:**
+  1. **The failure is not driven by Chatterbox.** On the same genuine parents, XTTS separates from real audio *more* than Chatterbox does: joint 0.890 against 0.744. XTTS stays worse on every field. This **corrects** the earlier hypothesis in the section below, which suspected Chatterbox and the held-out voices.
+  2. **Both generators fail independently.** Each is well above 0.60 on high-frequency energy (about 0.82–0.86) and rolloff. Shared parents give similar or higher AUCs, so differences in the underlying recordings don't explain the result.
+  3. **The fakes are band-limited and darker than LibriSpeech.** They have less energy above 4 kHz, a lower rolloff and more energy below 1 kHz. They also contain more speech per crop (less pause).
+  4. **Why train cross-validation looked milder (upper_band 0.547):** the four train XTTS voices differ from real audio less (upper_band 0.0165 against 0.037) than the two select-only XTTS voices do (0.0041). The size of the shortcut depends on the target voice, which a voice-disjoint split exposes only at select. This is inferred from means and was not separately tested per voice.
+- **Implication, for the owner:** PhonemeDF's genuine and synthetic audio differ systematically in bandwidth and spectral balance for both generators. Level normalisation can't remove that, and the one-audit rule forbids a further select trial. The dataset research (`20_DATASET_CANDIDATES.md`, above) is the indicated route: matched-chain pairs.
+- **Artifacts:** `MyDrive/audio-v3/stage0-en-ecapa-xtts-norm/explain/` holds:
+  - `explain.json`, the comparisons, means and reproduction check
+  - `descriptors.csv`, per-clip descriptors for 7,256 train and select clips
+  - `select_probe_scores.csv`, per-clip scores from each train-fitted probe
+  - logs
+- **Rerun:** `python -m pipeline_v3.en_treatment cache --data $D --cache /content/crops`, then `python -m pipeline_v3.audit_explain --data $D --cache /content/crops`. About 70 min on a 2-vCPU VM.
+
 ## English XTTS-only treated run (Option A): formal audit FAILED (25 Nov 2026, Claude)
 
 **Last completed stage:** the frozen-treatment formal audit, which failed. Catalog, pack, staging, the pilot and Teacher V1 did not run. **The A100 was released at 10:40:15 UTC.** No threshold or gate was changed, and no runner-up treatment was tried on select.
