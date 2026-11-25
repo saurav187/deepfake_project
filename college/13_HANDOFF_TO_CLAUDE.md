@@ -39,7 +39,17 @@ Restart only through the guard (no-op if running): `colab --auth=oauth2 ssh -s v
     | Opus 16 kb/s VoIP | 0.50 | 0.50 | 0.49 | 0.85 | 0.90 | 0.71 | 0.54 | 0.59 | 0.61 | 0.94 | FAIL |
 
   - Reading: shared re-encoding removes the container cue but **not** the dominant cues — level (rms), edge silence and upper-band energy. Note the Hindi rows are audited on stored bytes (only PhonemeDF goes through `fixed_crop`), whereas the model input trims and level-normalises; probe v2 measures crop / level-normalised / 7 kHz low-pass / Opus views to separate storage cues from what the model can see.
-- Codec probe v2: *pending*
+- Codec probe v2 (MEASURED; `MyDrive/audio-v3/stage0/codec_probe_hi_v2.json`, same 300 pairs; crop rows = 494 because 106 clips have < 4 s of active speech):
+
+    | Treatment (both labels) | rms | edge | upper_band | speech_ratio | rolloff | tilt | joint | gate |
+    |---|---|---|---|---|---|---|---|---|
+    | crop (PhonemeDF fixed 4 s centre crop) | 0.79 | 0.52 | 0.51 | **0.73** | 0.55 | 0.55 | 0.86 | FAIL |
+    | crop + unit level | 0.53 | 0.52 | 0.51 | **0.73** | 0.55 | 0.55 | 0.72 | FAIL |
+    | crop + unit level + 7 kHz low-pass | 0.46 | 0.52 | 0.51 | **0.73** | 0.55 | 0.55 | 0.72 | FAIL |
+    | crop + unit level + Opus 16 kb/s | 0.52 | 0.50 | 0.51 | **0.74** | 0.54 | 0.55 | 0.73 | FAIL |
+
+  - Reading: the model-view preprocessing (trim + centre crop + level) removes the edge, bandwidth and level cues (the upper-band difference was the silent edges, not the speech spectrum). **One cue remains: `speech_ratio` ≈ 0.73** (share of active 10 ms frames in the 4 s window — pause/rhythm structure of Kathbath reading vs IndicSynth voices). Re-encoding and low-pass do not change it. Under the approved policy, **Hindi fails the acoustic gate** even in the best treatment; thresholds were NOT loosened and Hindi was NOT dropped.
+  - Whether `speech_ratio` is a nuisance (corpus reading style) or a genuine synthesis cue (TTS pausing) is a research judgement for the owner. Options for the morning: (a) choose crops by matched speech activity (sample the 4 s window from the most-voiced region of BOTH labels, or match windows on speech_ratio) and re-measure; (b) add Hindi data whose real and fake share recording style (owner's Hindi recordings + Hindi Gemini/Microsoft fakes of the same texts); (c) keep the pilot English-only and report Hindi as blocked.
 
 **Next steps / decisions for the owner:** *pending*
 <!-- OVERNIGHT-STAGE1:END -->
