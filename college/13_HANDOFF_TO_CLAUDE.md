@@ -1,5 +1,52 @@
 # Pipeline v3 handoff for Claude
 
+## English XTTS-only treated run (Option A): formal audit FAILED (25 Nov 2026, Claude)
+
+**Last completed stage:** the frozen-treatment formal audit, which failed. Catalog, pack, staging, the pilot and Teacher V1 did not run. **The A100 was released at 10:40:15 UTC.** No threshold or gate was changed, and no runner-up treatment was tried on select.
+
+- **GPU:** an H100 was rejected ("no quota or entitlement"). Session `v3-a100` was an NVIDIA A100-SXM4-40GB with 12 vCPUs and a 236 GB disk.
+  - Displayed rate 8.16 CU/h (8.24 with the CPU session, which was stopped at 09:23).
+  - Allocated 09:16:50 UTC, released 10:40:15: **1 h 23 min elapsed.**
+  - **Actual CU:** 195.81 → 184.93 = **10.88 CU**.
+  - The first Drive mount failed on Colab's side. The retry succeeded without new authorization, after a stray local `/content/drive` directory was removed.
+- **Code deployed:** `f0cbc80`, which includes `b675661`.
+  - `pipeline_v3/en_treatment.py`: crop cache, train-only diagnostic, frozen record.
+  - `stage0 --treatment/--crop-cache`: the treatment is applied identically in audit and catalog and bound into prep-audit, catalog and pack.
+  - 52 tests pass.
+- **The original failed audit is preserved untouched** in `stage0-en-ecapa-xtts/`.
+- **Crop cache (measured):** one parallel source read of the three archives, 09:23:23–09:36:08 (12.8 min).
+  - 10,433 crops (1.3 GB) on the VM's local disk.
+  - Verified against the original `eligible.csv`: same eligible set, every sha256 equal.
+  - `manifest.json` and `cache-verify.json` are in `stage0-en-ecapa-xtts-diag/`.
+- **Diagnostic (measured), 09:36:08–09:52:39 (16.5 min):** train only, 4,488 rows from 126 readers.
+  - `protocol.json` was written **before** scoring. It holds the treatments, parameters, fold assignment hash and the rule.
+  - **Folds:** 5 reader-disjoint folds, with each genuine parent and its fakes in one fold.
+  - **Score:** per blocking field, the mean over folds of max(AUC, 1−AUC); the treatment score is the worst field, including joint.
+  - **Choice:** the lowest score, with a 0.01 tie margin going to the simpler treatment (norm < norm_lp7k < norm_opus).
+
+  | Treatment | Score | Highest fields |
+  |---|---|---|
+  | norm (`x·0.05/rms(x)`) | 0.723 | joint 0.723, tilt 0.679, speech_ratio 0.655, rolloff 0.607 |
+  | norm_lp7k (norm + 10th-order Butterworth 7 kHz, `sosfiltfilt`) | 0.896 | joint 0.896, rms 0.702, tilt 0.674 |
+  | norm_opus (norm + libopus 16 kb/s VoIP round trip) | 0.717 | joint 0.717, tilt 0.684, rolloff 0.637, speech_ratio 0.615 |
+
+  **Frozen: `norm`**, because opus was within the 0.01 tie margin. `frozen.json` records `select_rows_read: 0`.
+- **Formal audit of the exact `norm` bytes:** 09:52:39–10:38:58 (46 min, serial at about 3–4 clips/s).
+  - Select scoring, n = 2,768; the same 259 rows dropped by the parent join; 0.60 gate.
+  - **FAILED fields:** upper_band **0.817**, rolloff_hz **0.779**, tilt **0.758**, joint **0.758**, speech_ratio **0.659**.
+  - **Passed:** rms 0.493 (was 0.886 untreated), edge 0.578, and duration/codec/rate/source/pair at 0.50.
+  - **Exact reason:** `ValueError: Nuisance gate failed; see …/stage0-en-ecapa-xtts-norm/prep-audit.json`.
+- **Observation, recorded and not acted on:**
+  - The spectral fields on select equal the untreated audit exactly (0.817 / 0.779 / 0.758). That is expected, because level scaling doesn't change spectral shape.
+  - On train cross-validation, upper_band was only 0.547 and rolloff 0.607.
+  - Select contains the held-out Chatterbox fakes (819 of 1,464 select fakes) and two select-only XTTS voices, which train never sees. So the remaining select separation is likely driven by Chatterbox and/or those voices rather than the XTTS train cell. Not tested.
+- **Artifacts:**
+  - `MyDrive/audio-v3/stage0-en-ecapa-xtts-diag/`: `protocol.json`, `diagnostic.json`, `frozen.json`, `manifest.json`, `cache-verify.json`, `treat_chain.log` and the `t_*.log` files.
+  - `MyDrive/audio-v3/stage0-en-ecapa-xtts-norm/`: `selection.csv` (equal to the original), `eligible.csv`, `prep-audit.json` and logs.
+  - The crop cache was on the released VM and is gone. Rebuilding it takes about 13 min.
+- **Resume:** none under the current gates. The diagnostic refuses to rerun (`frozen.json` exists), and only `norm` may be audited. Any further English attempt needs a new owner decision.
+- **Progress tool:** `pipeline_v3/colab_progress.sh` (read-only; shows progress and CU used).
+
 ## English XTTS-only run — audit FAILED (25 Nov 2026, Claude; owner option B)
 
 **Last completed stage: match.** The acoustic audit failed at 08:40 UTC (14:10 IST). Catalog, pack, pilot and Teacher V1 did not run. **No GPU was provisioned**, so no A100 or H100 was used and there is no throughput or teacher checkpoint. No threshold or gate was changed.
