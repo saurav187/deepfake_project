@@ -171,12 +171,12 @@ Advisory train→dev simple-feature probes (`audit.json`, `22:54:22 IST`):
 - **C2 training (`v2-l4`, 6,000 steps):** `23:53:25–01:16:28 IST` (83 min). `v2-l4` verified (SHA-256 `3c180a32…`) and **released at 01:26 IST**.
 - **C3 training (`v2-a100`, 4,500 steps):** `00:08:18–01:11:47 IST` (63 min).
 - **Finish chain (`v2-a100`):** `select` (`01:22:17`), `calibrate` (`01:24:29`), `signoff` (`01:25:51`), `evaluate` (`01:26:17–03:14:49 IST`, 108 min — bottlenecked by serial CPU `ffmpeg`), `baseline` (`03:14:49–03:17:06 IST`, 2.3 min).
-- **Compute balance:** `129.26 CU` (post-outage recovery at ~00:03 IST) → `119.15 CU` (01:02 IST) → `113.89 CU` (after releasing L4 at 01:28 IST) → **`96.89 CU`** (03:36 IST, **~32.4 CU** used from recovery through full training, 5-channel evaluation, and Release v1 baseline).
-- **Active sessions:** `v2-a100` is **idle (0% GPU / 0 MiB)** and awaiting owner confirmation to release (`8.16 CU/hr`).
+- **Compute balance:** `129.26 CU` (post-outage recovery at ~00:03 IST) → `119.15 CU` (01:02 IST) → `113.89 CU` (after releasing L4 at 01:26 IST) → `96.89 CU` (03:36 IST) → **`95.55 CU`** final balance after releasing `v2-a100` at **03:44 IST** (**~33.7 CU** used from recovery through full training, 5-channel evaluation, and Release v1 baseline).
+- **Active sessions:** **0** (`v2-l4` released at 01:26 IST; `v2-a100` released at 03:44 IST; usage rate **0.00 CU/hr**).
 
 ## Recommended Next Actions
 
-1. **Release `v2-a100` immediately** (all artifacts verified on Drive and locally).
+1. **Both GPUs are released (`0.00 CU/hr`);** revoke the temporary HF/Kaggle tokens in the untracked local `college/30_CODEX_V2_90_HANDOVER.md` when finished with this phase.
 2. **Fix calibration / LibriTTS domain gap before any V2 release:** Include matched genuine audiobook calibration/training balance or per-domain calibration checks, and consider selecting checkpoints with a combined `(key, pooled, EER)` tie-break rather than `key` alone (both `c2` and `c3` stopped updating `best.pt` at step 500).
 3. **Parallelize `ffmpeg` in `v2_90.py` evaluation** (cache channel-processed waveforms once across ensemble members using multiprocessing) to cut 5-channel evaluation from ~108 min down to ~3 min.
 4. **Collect a fresh sealed confirmation set** (including real phone/WhatsApp recordings and held-out unseen modern TTS families) before making any deployment or student-distillation promotion claim.
