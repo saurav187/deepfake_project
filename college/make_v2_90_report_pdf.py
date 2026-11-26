@@ -290,12 +290,12 @@ T([["Stage", "Hardware", "Time (IST)", "Elapsed", "Notes / Artifacts"],
    ["Select + Cal + Signoff", "v2-a100", "01:22 – 01:26", "4 min", "C4 selected; cutoff 0.8830; signoff bound"],
    ["5-Channel Evaluation", "v2-a100", "01:26 – 03:15", "108 min", "Serial CPU ffmpeg bottleneck (~13k calls/ch)"],
    ["Release v1 Baseline", "v2-a100", "03:15 – 03:17", "2.3 min", "3,897 clean clips; <font name='Mono'>baseline.json</font>"],
-   ["<b>Total Post-Recovery</b>", "L4 + A100", "00:03 – 03:36", "<b>~3.5 h</b>", "<b>129.26 → 96.89 CU (~32.4 CU used)</b>"]],
+   ["<b>Total Post-Recovery</b>", "L4 + A100", "00:03 – 03:44", "<b>~3.7 h</b>", "<b>129.26 → 95.55 CU (~33.7 CU used; 0 active GPUs)</b>"]],
   [3.4, 1.8, 2.6, 1.8, 6.8])
 
 H2("Recommended Next Steps")
-B("<b>1. Release v2-a100 immediately:</b> All outputs are SHA-256 verified on Drive and locally; no further GPU work "
-  "is queued.",
+B("<b>1. Sessions closed (0.00 CU/hr):</b> Both v2-l4 (01:26 IST) and v2-a100 (03:44 IST) are released with all "
+  "outputs saved on Drive. Revoke temporary HF/Kaggle tokens from the untracked handover file when finished.",
   "<b>2. Fix calibration & checkpoint selection:</b> Tie-break <font name='Mono'>best.pt</font> by "
   "<font name='Mono'>(key, pooled, -EER)</font> instead of <font name='Mono'>key</font> alone, and address the "
   "LibriTTS domain FA spike via matched audiobook controls or domain-aware calibration before shipping.",
