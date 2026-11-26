@@ -23,7 +23,7 @@ case "${1:?phase}" in
   prep)
     log "copy raw"
     mkdir -p "$R"
-    rsync -a --info=stats1 --exclude librittsr --exclude globe --exclude '*.part' "$D/raw/" "$R/"
+    rsync -a --info=stats1 --exclude librittsr --exclude globe --exclude voxenes --exclude '*.part' "$D/raw/" "$R/"
     [ -f "$R/mailabs_en_US.tgz" ] || cp /content/drive/MyDrive/audio-v3/development/mailabs/en_US.tgz "$R/mailabs_en_US.tgz"
     log "prep (staged; published only after verification)"
     python3 -u -m pipeline_v3.v2_90 prep --raw "$R" --work "$W" --mailabs "$R/mailabs_en_US.tgz" \
