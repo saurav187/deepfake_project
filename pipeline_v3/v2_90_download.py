@@ -24,7 +24,7 @@ TARGET_RELATED = [
     "Gemini-3.1-Flash-TTS",
 ]
 ON_DRIVE = ["Chatterbox", "ElevenLabs-v3", "FishTTS", "Gemini-3.1-Flash-TTS"]  # development/mlaad copy
-DIVERSE_PER_FOLDER = 300  # en_US rows only (training never uses en_UK of non-target folders)
+DIVERSE_PER_FOLDER = 150  # en_US rows only (training never uses en_UK of non-target folders)
 DIVERSE_N = 20
 DIVERSE = [
     "Cartesia.ai (Sonic-3)", "DeepGram", "Edge-TTS", "OpenAI TTS-1 HD", "minimax_speech-2.6-hd",
