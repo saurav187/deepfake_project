@@ -96,7 +96,13 @@ def mlaad_rows(raw):
     for tp in sorted((raw / "mlaad").glob("*.tar")):
         folder = tp.stem
         with tarfile.open(tp) as t:
-            meta = t.extractfile(f"{folder}/meta.csv").read().decode()
+            try:
+                meta = t.extractfile(f"{folder}/meta.csv").read().decode()
+            except KeyError:  # meta lost on a restarted download: publisher meta.csv sidecar (same revision)
+                side = raw / "mlaad-meta" / f"{folder}.csv"
+                if not side.exists():
+                    raise ValueError(f"{tp.name}: no meta.csv and no sidecar {side}")
+                meta = side.read_text()
         lang, base = split_lang(folder)
         for r in csv.DictReader(io.StringIO(meta), delimiter="|"):
             region = r["original_file"].split("/")[0]
