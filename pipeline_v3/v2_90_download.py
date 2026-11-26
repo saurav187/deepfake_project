@@ -54,10 +54,10 @@ def sha(p):
 def main():
     out = Path(sys.argv[1])
     only = sys.argv[2] if len(sys.argv) > 2 else "all"
-    scratch = Path(f"/content/v290-scratch-{only}")
+    scratch = Path(f"/content/v290-scratch-{'mlaad' if only == 'rel' else only}")  # rel reuses partial files
     out.mkdir(parents=True, exist_ok=True)
     sums = out / f"SHA256SUMS.{only}"
-    done = {l.split("  ", 1)[1] for l in sums.read_text().splitlines()} if sums.exists() else set()
+    done = {l.split("  ", 1)[1] for f in out.glob("SHA256SUMS*") for l in f.read_text().splitlines() if "  " in l}
 
     def publish(local, rel):
         dst = out / rel
@@ -84,11 +84,13 @@ def main():
         tpath.unlink()
         print(f"{time.time() - t0:7.0f}s mlaad {folder}", flush=True)
 
-    for folder in (ON_DRIVE if only not in ("genuine", "extra") else []):
+    # parallel MLAAD modes: "rel" (related folders), "divA"/"divB" (diverse halves)
+    par = only in ("rel", "divA", "divB")
+    for folder in (ON_DRIVE if only not in ("genuine", "extra") and not par else []):
         rel = f"mlaad/{folder}.tar"
         if rel not in done:
             pack(drive_mlaad / folder, folder, rel)
-    for folder in [f for f in TARGET_RELATED if f not in ON_DRIVE and only not in ("genuine", "extra")]:
+    for folder in [f for f in TARGET_RELATED if f not in ON_DRIVE and (only in ("mlaad", "all", "rel"))]:
         rel = f"mlaad/{folder}.tar"
         if rel in done:
             continue
@@ -99,7 +101,9 @@ def main():
         shutil.rmtree(d / "fake/en" / folder)
     import csv as _csv
     import hashlib as _h
-    div = EXTRA_MLAAD if only == "extra" else (DIVERSE[:DIVERSE_N] if only != "genuine" else [])
+    half = DIVERSE_N // 2
+    div = {"extra": EXTRA_MLAAD, "divA": DIVERSE[:half], "divB": DIVERSE[half:DIVERSE_N], "genuine": [],
+           "rel": []}.get(only, DIVERSE[:DIVERSE_N])
     for folder in div:
         rel = f"mlaad/{folder}.tar"
         if rel in done:
@@ -119,7 +123,7 @@ def main():
                 f.unlink()
         pack(src, folder, rel)
         shutil.rmtree(src)
-    gen = EXTRA_GENUINE if only == "extra" else (GENUINE if only != "mlaad" else {})
+    gen = EXTRA_GENUINE if only == "extra" else (GENUINE if only in ("genuine", "all") else {})
     for name, (repo, pats) in gen.items():
         d = scratch / name
         snapshot_download(repo, repo_type="dataset", local_dir=d, allow_patterns=pats, max_workers=16)
