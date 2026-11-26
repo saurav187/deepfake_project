@@ -38,6 +38,11 @@ CHANNELS_EVAL = ["clean", "mulaw8k", "g726", "opus12", "gsm"]
 TRAIN_CODECS = ["mulaw8k", "alaw8k", "gsm", "opus8", "opus16", "opus24", "mp3"]  # G.726 held out (unseen codec)
 IST = timezone(timedelta(hours=5, minutes=30))
 HINDI_SOURCES = ("kathbath", "indicvoices")
+# Documented minimum coverage (protocol 28 amendment 6). Fakes: eligible recordings per target family;
+# genuine: (recordings, speakers) per split. Below these, training/selection is refused or a cell is insufficient.
+MIN_FAKE = {"train": 200, "dev": 25, "test": 100}
+MIN_GEN = {"train": (3000, 100), "dev": (200, 20), "cal": (500, 50), "test": (500, 60)}
+PREPARED = "prepared"
 HINDI_CAP_FAKE = 3000
 
 
@@ -128,10 +133,10 @@ def genuine_split(corpus, spk, part):
         return "test" if part == "test" else "train"
     if corpus == "mailabs":
         return "train"
-    if corpus == "edacc":  # conversational, ~40 accents; split by speaker
-        b = h("edacc/" + spk.rsplit("-", 1)[0]) % 5  # by conversation (EDACC-C08-A/B share a recording)
+    if corpus == "edacc":  # spk here is the conversation id (EDACC-C08-A/B share a recording)
+        b = h("edacc/" + spk) % 5
         return "test" if b == 0 else ("cal" if b == 1 else "train")
-    if corpus == "ami":  # by speaker across official folds, so no AMI speaker spans train and test
+    if corpus == "ami":  # spk here is the meeting/speaker connected component (see ami_components)
         b = h("ami/" + spk) % 5
         return "test" if b == 0 else ("cal" if b == 1 else "train")
     raise ValueError(corpus)
@@ -152,9 +157,34 @@ def spk_col(cols):
     raise ValueError(f"no speaker column in {cols}")
 
 
-def iter_genuine(raw):
-    """Yield (uid, corpus, split, speaker, raw bytes) for all genuine sources."""
+def ami_components(raw):
+    """Union meetings and speakers: a meeting (all mic views) and every meeting a speaker attends form one
+    component, so no AMI recording or speaker spans two splits."""
     import pyarrow.parquet as pq
+
+    parent = {}
+
+    def find(a):
+        while parent.setdefault(a, a) != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for p in sorted((raw / "ami").rglob("*.parquet")):
+        t = pq.read_table(p, columns=["meeting_id", "speaker_id"])
+        for m, sp in zip(t.column("meeting_id").to_pylist(), t.column("speaker_id").to_pylist()):
+            a, b = find("m:" + str(m)), find("s:" + str(sp))
+            if a != b:
+                parent[max(a, b)] = min(a, b)
+    return {k: find(k) for k in list(parent)}
+
+
+def iter_genuine(raw):
+    """Yield (uid, corpus, split, speaker, parent, group, raw bytes) for all genuine sources.
+    parent = recording identity (mic/channel siblings share it); group = the unit that decides the split."""
+    import pyarrow.parquet as pq
+
+    comp = ami_components(raw) if (raw / "ami").exists() else {}
 
     # LibriTTS-R and GLOBE v2 are excluded (neural restoration / enhancement + upsampling: not clean genuine).
     for corpus in ("libritts", "vctk", "ami", "edacc"):
@@ -165,14 +195,26 @@ def iter_genuine(raw):
             pf = pq.ParquetFile(p)
             for rg in range(pf.num_row_groups):
                 t = pf.read_row_group(rg)
-                ac, sc = audio_col(t), spk_col(t.column_names)
-                ids = t.column("id").to_pylist() if "id" in t.column_names else None
+                cols = t.column_names
+                ac, sc = audio_col(t), spk_col(cols)
+
+                def col(c, t=t, cols=cols):
+                    return t.column(c).to_pylist() if c in cols else None
+
+                ids, text_id, meet, begin = col("id"), col("text_id"), col("meeting_id"), col("begin_time")
                 for i, (a, s) in enumerate(zip(t.column(ac).to_pylist(), t.column(sc).to_pylist())):
                     s = str(s)
                     uid = f"{corpus}/{s}/{ids[i] if ids else (a.get('path') or f'{p.stem}-{rg}-{i}')}"
+                    parent, group = uid, s
                     if corpus == "ami":
                         uid = f"ami-{part}/{s}/{ids[i] if ids else i}"
-                    yield uid, corpus, genuine_split(corpus, s, part), s, a["bytes"]
+                        parent = f"ami/{meet[i]}/{s}/{begin[i]}"  # IHM and SDM views of one segment
+                        group = comp["m:" + str(meet[i])]
+                    elif corpus == "vctk" and text_id:
+                        parent = f"vctk/{s}/{text_id[i]}"  # mic1/mic2 siblings of one utterance
+                    elif corpus == "edacc":
+                        group = s.rsplit("-", 1)[0]  # conversation
+                    yield uid, corpus, genuine_split(corpus, group, part), s, parent, group, a["bytes"]
 
 
 def iter_mailabs(tgz):
@@ -180,7 +222,8 @@ def iter_mailabs(tgz):
         for m in t:
             if m.isfile() and m.name.endswith(".wav") and "/by_book/" in m.name:
                 spk = m.name.split("/by_book/")[1].split("/")[1]
-                yield f"mailabs/{m.name}", "mailabs", "train", spk, t.extractfile(m).read()
+                yield (f"mailabs/{m.name}", "mailabs", "train", spk, f"mailabs/{m.name}", spk,
+                       t.extractfile(m).read())
 
 
 def hindi_split(spk):
@@ -241,12 +284,24 @@ def iter_indiefake(tp):
                 yield r, t.extractfile(m).read()
 
 
+def native_info(raw):
+    """Original duration (s) and native sample rate before any treatment; (None, None) if unreadable."""
+    try:
+        import soundfile as sf
+
+        i = sf.info(io.BytesIO(raw))
+        return round(i.frames / i.samplerate, 3), int(i.samplerate)
+    except Exception:
+        return None, None
+
+
 def _crop_job(args):
     uid, raw = args
+    dur, sr = native_info(raw)
     try:
-        return uid, crop(raw), None
+        return uid, crop(raw), None, dur, sr
     except Exception as e:
-        return uid, None, f"error:{type(e).__name__}"
+        return uid, None, f"error:{type(e).__name__}", dur, sr
 
 
 class ShardWriter:
@@ -271,14 +326,24 @@ class ShardWriter:
         self.buf, self.meta, self.n = [], [], self.n + 1
 
 
-def prep(raw, work, mailabs_tgz, workers, hindi_root=None):
+def prep(raw, work, mailabs_tgz, workers, hindi_root=None, include_voxenes=False):
     from multiprocessing import Pool
 
-    shards = work / "shards"
+    stage = work / f"stage-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+    shards = stage / "shards"
     excl = Counter()
     writers = {s: ShardWriter(shards, s) for s in ("train", "dev", "cal", "test")}
     rows = mlaad_rows(raw)
     print(f"mlaad rows {len(rows)} {Counter((r['split'], r['family'] in TARGETS) for r in rows)}", flush=True)
+    seen_orig, kept = set(), []
+    for r in sorted(rows, key=lambda r: key_uid(r["uid"])):
+        k = (r["family"], r["parent"])
+        if k in seen_orig:
+            excl[f"{r['split']}|{r['family']}|repeated_original"] += 1
+            continue
+        seen_orig.add(k)
+        kept.append(dict(r, group=r["parent"]))
+    rows = kept
     by_tar = defaultdict(list)
     for r in rows:
         by_tar[r["locator"].split("::")[0]].append(r)
@@ -291,8 +356,8 @@ def prep(raw, work, mailabs_tgz, workers, hindi_root=None):
                     if m.name in want:
                         jobs.append((want[m.name]["uid"], t.extractfile(m).read()))
             byuid = {r["uid"]: r for r in rs}
-            for uid, x, err in pool.imap_unordered(_crop_job, jobs, chunksize=8):
-                r = byuid[uid]
+            for uid, x, err, dur, sr in pool.imap_unordered(_crop_job, jobs, chunksize=8):
+                r = dict(byuid[uid], dur_s=dur, sr_native=sr)
                 if x is None:
                     excl[f"{r['split']}|{r['family']}|{err or 'short'}"] += 1
                     continue
@@ -304,20 +369,25 @@ def prep(raw, work, mailabs_tgz, workers, hindi_root=None):
 
         def admit():
             for it in srcs:
-                for uid, corpus, split, spk, b in it:
+                for uid, corpus, split, spk, parent, group, b in it:
                     cap = GEN_CAP_SPK if split == "train" else EVAL_CAP_SPK
-                    if split == "train" and h(f"{corpus}/{spk}") % 10 == 0:
+                    if split == "train" and h(f"{corpus}/{group}") % 10 == 0:
                         split = "dev"
                     k = (corpus, split, spk)
+                    if (corpus, parent) in seen_parent:  # one recording per condition (mic siblings dropped)
+                        excl[f"{split}|genuine/{corpus}|duplicate_parent"] += 1
+                        continue
                     if per_spk[k] >= cap or (split in ("train", "dev") and per_corpus[(corpus, split)] >= GEN_CAP_CORPUS):
                         continue
+                    seen_parent.add((corpus, parent))
                     per_spk[k] += 1
                     per_corpus[(corpus, split)] += 1
                     meta[uid] = dict(uid=uid, split=split, label=0, family="genuine", source=corpus,
-                                     speaker=f"{corpus}/{spk}", parent=uid, locator="")
+                                     speaker=f"{corpus}/{spk}", parent=f"{corpus}:{parent}",
+                                     group=f"{corpus}:{group}", locator="")
                     yield uid, b
 
-        meta = {}
+        meta, seen_parent = {}, set()
         itp = raw / "indiefake" / "indiefake.tar"
 
         def admit_all():
@@ -341,7 +411,7 @@ def prep(raw, work, mailabs_tgz, workers, hindi_root=None):
                                      parent=uid, locator="")
                     yield uid, b
             vzp = raw / "voxenes" / "voxenes-2026.zip"
-            if vzp.exists():
+            if include_voxenes and vzp.exists():  # off by default: no source/target speaker lineage
                 for r, b in iter_voxenes(vzp):
                     meta[r["uid"]] = r
                     yield r["uid"], b
@@ -362,39 +432,153 @@ def prep(raw, work, mailabs_tgz, workers, hindi_root=None):
                                      speaker=spk, parent=uid, locator="")
                     yield uid, b
 
-        for uid, x, err in pool.imap_unordered(_crop_job, admit_all(), chunksize=8):
-            r = meta[uid]
+        for uid, x, err, dur, sr in pool.imap_unordered(_crop_job, admit_all(), chunksize=8):
+            r = dict(meta.pop(uid), dur_s=dur, sr_native=sr)
             if x is None:
                 excl[f"{r['split']}|genuine/{r['source']}|{err or 'short'}"] += 1
                 continue
             writers[r["split"]].add(r, x)
     for w in writers.values():
         w.flush()
-    man = load_manifest(work)
+    man = load_rows(shards)
     counts = Counter((r["split"], r["family"] if r["label"] else "genuine/" + r["source"]) for r in man)
     spk = defaultdict(set)
     for r in man:
         spk[(r["split"], r["family"] if r["label"] else "genuine/" + r["source"])].add(r["speaker"])
     rep = {"made": now(), "counts": {f"{a}|{b}": n for (a, b), n in sorted(counts.items())},
            "speakers_or_voices": {f"{a}|{b}": len(v) for (a, b), v in sorted(spk.items())},
-           "excluded": dict(sorted(excl.items())), "checks": leakage(man)}
-    (work / "prep.json").write_text(json.dumps(rep, indent=1))
+           "excluded": dict(sorted(excl.items())), "checks": leakage(man),
+           "coverage": coverage(man), "voxenes_included": include_voxenes,
+           "hindi_root": str(hindi_root) if hindi_root else None}
+    (stage / "prep.json").write_text(json.dumps(rep, indent=1))
+    rep["prepared"] = publish_prepared(work, stage)
+    return rep
+
+
+def key_uid(u):
+    return hashlib.sha256(u.encode()).hexdigest()
+
+
+def load_rows(shards, splits=None):
+    rows = []
+    for p in sorted(shards.glob("*.jsonl")):
+        if splits and p.name.split("-")[0] not in splits:
+            continue
+        rows += [json.loads(line) for line in p.read_text().splitlines()]
+    return rows
+
+
+def verify_shards(shards):
+    """Row counts, row->audio references and hashes of every shard file. Returns (files, fingerprint)."""
+    files, refs = {}, set()
+    for j in sorted(shards.glob("*.jsonl")):
+        npy = j.with_suffix(".npy")
+        if not npy.exists():
+            raise ValueError(f"{j.name}: missing audio shard {npy.name}")
+        arr = np.load(npy, mmap_mode="r")
+        rows = [json.loads(line) for line in j.read_text().splitlines()]
+        if arr.ndim != 2 or arr.shape[1] != WIN or len(rows) != arr.shape[0]:
+            raise ValueError(f"{j.name}: {len(rows)} rows vs audio shape {arr.shape}")
+        for i, r in enumerate(rows):
+            if r["shard"] != npy.name or r["idx"] != i:
+                raise ValueError(f"{j.name}:{i} points at {r['shard']}:{r['idx']}")
+            if (npy.name, i) in refs:
+                raise ValueError(f"duplicate audio reference {npy.name}:{i}")
+            refs.add((npy.name, i))
+        files[j.name] = {"sha256": fsha(j), "rows": len(rows)}
+        files[npy.name] = {"sha256": fsha(npy), "rows": int(arr.shape[0])}
+    if not files:
+        raise ValueError(f"no shards in {shards}")
+    fp = hashlib.sha256("\n".join(f"{k} {v['sha256']}" for k, v in sorted(files.items())).encode()).hexdigest()
+    return files, fp
+
+
+def publish_prepared(work, stage):
+    """Verify a staged prep, write its completion manifest last, then swap it in atomically.
+    An existing prepared set is moved aside, never deleted."""
+    files, fp = verify_shards(stage / "shards")
+    leakage(load_rows(stage / "shards"))
+    man = {"complete": True, "made": now(), "fingerprint": fp, "files": files, "code_sha256": fsha(__file__),
+           "prep_json_sha256": fsha(stage / "prep.json")}
+    (stage / "PREPARED.json").write_text(json.dumps(man, indent=1))
+    dst = work / PREPARED
+    if dst.exists():
+        os.replace(dst, work / f"{PREPARED}-superseded-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}")
+    os.replace(stage, dst)
+    return {"fingerprint": fp, "files": len(files)}
+
+
+def verify_prepared(work):
+    """Fail clearly unless work/prepared is a complete, untouched prep (manifest, hashes, references)."""
+    d = work / PREPARED
+    mp = d / "PREPARED.json"
+    if not mp.exists():
+        raise ValueError(f"{d}: no completion manifest (interrupted copy or unpublished prep)")
+    man = json.loads(mp.read_text())
+    files, fp = verify_shards(d / "shards")
+    if not man.get("complete") or fp != man["fingerprint"] or files != man["files"]:
+        raise ValueError(f"{d}: shards differ from their completion manifest")
+    return fp
+
+
+def coverage(man):
+    """Eligible recordings, unique parents and genuine speakers per split and family (preflight input)."""
+    cov = defaultdict(lambda: {"recordings": 0, "parents": set(), "speakers": set()})
+    for r in man:
+        k = f"{r['split']}|{r['family'] if r['label'] else 'genuine'}"
+        if r["label"] == 0 and r["source"] in HINDI_SOURCES:
+            k = f"{r['split']}|genuine_hindi"
+        c = cov[k]
+        c["recordings"] += 1
+        c["parents"].add(r["parent"])
+        c["speakers"].add(r["speaker"])
+    return {k: {"recordings": v["recordings"], "parents": len(v["parents"]), "speakers": len(v["speakers"])}
+            for k, v in sorted(cov.items())}
+
+
+def preflight(work, splits=("train", "dev", "cal", "test")):
+    """Refuse to train/select/evaluate unless every target family and the English genuine controls meet the
+    documented minimum coverage in each split."""
+    cov = coverage(load_manifest(work))
+    fails = []
+    for sp in splits:
+        for f in TARGETS:
+            if sp in MIN_FAKE:
+                n = cov.get(f"{sp}|{f}", {}).get("parents", 0)
+                if n < MIN_FAKE[sp]:
+                    fails.append(f"{sp}|{f}: {n} unique parents < {MIN_FAKE[sp]}")
+        if sp in MIN_GEN:
+            g = cov.get(f"{sp}|genuine", {"recordings": 0, "speakers": 0})
+            if g["recordings"] < MIN_GEN[sp][0] or g["speakers"] < MIN_GEN[sp][1]:
+                fails.append(f"{sp}|genuine: {g['recordings']} rec / {g['speakers']} spk < {MIN_GEN[sp]}")
+    rep = {"checked": now(), "coverage": cov, "minimums": {"fake": MIN_FAKE, "genuine": MIN_GEN}, "fails": fails}
+    (work / "preflight.json").write_text(json.dumps(rep, indent=1))
+    if fails:
+        raise ValueError("Coverage preflight failed: " + "; ".join(fails))
     return rep
 
 
 def load_manifest(work, splits=None):
-    rows = []
-    for p in sorted((work / "shards").glob("*.jsonl")):
-        if splits and p.name.split("-")[0] not in splits:
-            continue
-        rows += [json.loads(l) for l in p.read_text().splitlines()]
-    return rows
+    return load_rows(work / PREPARED / "shards", splits)
 
 
 def leakage(man):
     def sets(split, key, label=None):
         return {r[key] for r in man if r["split"] == split and (label is None or r["label"] == label)}
 
+    dup = [u for u, n in Counter(r["uid"] for r in man).items() if n > 1]
+    if dup:
+        raise ValueError(f"duplicate recording ids: {dup[:5]}")
+    rep_orig = [k for k, n in Counter((r["family"], r["parent"]) for r in man if r["label"] == 1).items() if n > 1]
+    if rep_orig:
+        raise ValueError(f"repeated originals within a family: {rep_orig[:5]}")
+    split_of = defaultdict(set)
+    for r in man:
+        split_of[("parent", r["parent"])].add(r["split"])
+        split_of[("group", r.get("group") or r["parent"])].add(r["split"])
+        if r["label"] == 0:
+            split_of[("genuine_speaker", r["speaker"])].add(r["split"])
+    crossing = Counter(k[0] for k, v in split_of.items() if len(v) > 1)
     tr = {"train", "dev"}
     tr_par = set().union(*(sets(s, "parent", 1) for s in tr))
     tr_spk = set().union(*(sets(s, "speaker", 0) for s in tr))
@@ -409,6 +593,7 @@ def leakage(man):
         return {(base_family(r["family"]).split("-")[0], r["speaker"].split(":", 1)[1]) for r in man
                 if r["split"] == split and r["label"] == 1 and base_family(r["family"]).startswith(VOICE_SPLIT)}
     chk["test_stock_voice_in_train"] = len(voices("test") & (voices("train") | voices("dev")))
+    chk.update({f"split_crossing_{k}": crossing.get(k, 0) for k in ("parent", "group", "genuine_speaker")})
     if any(chk.values()):
         raise ValueError(f"Split leakage: {chk}")
     return chk
@@ -422,7 +607,7 @@ class Store:
         self._m = {}
 
     def x(self, r):
-        p = self.work / "shards" / r["shard"]
+        p = self.work / PREPARED / "shards" / r["shard"]
         if p not in self._m:
             self._m[p] = np.load(p, mmap_mode="r")
         return self._m[p][r["idx"]].astype(np.float32) / 32768
@@ -520,10 +705,17 @@ def build_model(encoder, freeze_below=0):
     return Det()
 
 
-def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_every, tag="c2", freeze_below=0):
+def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_every, tag="c2", freeze_below=0,
+          stop_after=None, skip_preflight=False):
     import torch
     from torch.utils.data import DataLoader, IterableDataset
 
+    fp = verify_prepared(work)
+    if not skip_preflight:
+        preflight(work, ("train", "dev"))
+    cfg = {"dataset_fingerprint": fp, "tag": tag, "encoder": encoder, "freeze_below": freeze_below,
+           "steps": steps, "batch": batch, "lr_enc": lr_enc, "lr_head": lr_head, "eval_every": eval_every,
+           "code_sha256": fsha(__file__)}
     store = Store(work, {"train"})
     dev = Store(work, {"dev"})
     rows = store.rows
@@ -557,6 +749,9 @@ def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_eve
     start, best, hist = 0, None, []
     if (ck / "last.pt").exists():
         s = torch.load(ck / "last.pt", map_location="cpu", weights_only=False)
+        diff = {k: (s.get("cfg", {}).get(k), v) for k, v in cfg.items() if k != "code_sha256" and s.get("cfg", {}).get(k) != v}
+        if diff:
+            raise ValueError(f"{ck}/last.pt belongs to a different dataset or candidate config: {diff}")
         model.load_state_dict(s["model"]); opt.load_state_dict(s["opt"]); sched.load_state_dict(s["sched"])
         start, best, hist = s["step"], s["best"], s["hist"]
         print(f"resumed at {start}", flush=True)
@@ -580,16 +775,23 @@ def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_eve
             m = dev_metric(dev_rows, sc)
             hist.append({"step": step + 1, **m})
             print(f"DEV step {step + 1}: {json.dumps(m)}", flush=True)
-            if best is None or m["key"] > best["key"]:
+            if m["sufficient"] and (best is None or m["key"] > best["key"]):
                 best = {"step": step + 1, **m}
-                torch.save(model.state_dict(), ck / "best.pt")
+                torch.save(model.state_dict(), ck / "best.tmp")
+                os.replace(ck / "best.tmp", ck / "best.pt")
+                (ck / "best.json").write_text(json.dumps({"cfg": cfg, "step": step + 1, "metric": m,
+                                                          "sha256": fsha(ck / "best.pt")}, indent=1))
             model.train()
             torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "sched": sched.state_dict(),
-                        "step": step + 1, "best": best, "hist": hist}, ck / "last.tmp")
+                        "step": step + 1, "best": best, "hist": hist, "cfg": cfg}, ck / "last.tmp")
             os.replace(ck / "last.tmp", ck / "last.pt")
             (work / f"train-{tag}.json").write_text(json.dumps({"tag": tag, "encoder": encoder, "best": best,
                                                                 "hist": hist}, indent=1))
-            mirror(work, drive, [f"train-{tag}.json", f"ckpt-{tag}/best.pt", f"ckpt-{tag}/last.pt"])
+            mirror(work, drive, [f"train-{tag}.json", f"ckpt-{tag}/best.pt", f"ckpt-{tag}/best.json",
+                                 f"ckpt-{tag}/last.pt"])
+            if stop_after and step + 1 >= stop_after and step + 1 < steps:
+                print(f"STOP_AFTER {step + 1}: simulated interruption", flush=True)
+                return {"stopped_at": step + 1, "best": best}
     return best
 
 
@@ -612,15 +814,25 @@ def cutoff_at(gen_scores, fa=0.15):
     return math.nextafter(s[k], math.inf) if k < len(s) else -math.inf
 
 
-def dev_metric(rows, sc):
-    c = cutoff_at([s for r, s in zip(rows, sc) if r["label"] == 0])
-    det = {}
+def dev_metric(rows, sc, min_fake=None):
+    """Development selection metric. Insufficient (key = -1) unless every target family has at least
+    min_fake recordings and English genuine controls exist: absent families never count as perfect."""
+    min_fake = MIN_FAKE["dev"] if min_fake is None else min_fake
+    gen = [s for r, s in zip(rows, sc) if r["label"] == 0 and r.get("source") not in HINDI_SOURCES]
+    c = cutoff_at(gen) if gen else math.inf
+    det, n, short = {}, {}, []
     for f in TARGETS:
         v = [s >= c for r, s in zip(rows, sc) if r["family"] == f]
+        n[f] = len(v)
         det[f] = round(sum(v) / len(v), 4) if v else None
+        if len(v) < min_fake:
+            short.append(f"{f}: {len(v)} < {min_fake}")
+    if not gen:
+        short.append("no English genuine")
     allf = [s >= c for r, s in zip(rows, sc) if r["label"] == 1]
-    return {"cutoff": c, "det": det, "pooled": round(sum(allf) / len(allf), 4),
-            "key": min(v for v in det.values() if v is not None)}
+    ok = not short
+    return {"cutoff": c, "det": det, "n": n, "pooled": round(sum(allf) / len(allf), 4) if allf else 0.0,
+            "sufficient": ok, "insufficient": short, "key": min(det.values()) if ok else -1.0}
 
 
 def mirror(work, drive, rels):
@@ -662,7 +874,9 @@ def audit(work):
         st = Store(work, {split})
         rng = random.Random(7)
         rows = st.rows if len(st.rows) < 12000 else rng.sample(st.rows, 12000)
-        res[split] = (rows, [simple_features(st.x(r)) for r in rows])
+        res[split] = (rows, [dict(simple_features(st.x(r)),
+                                  native_duration=float(r.get("dur_s") or -1),
+                                  native_sample_rate=float(r.get("sr_native") or -1)) for r in rows])
     names = list(res["train"][1][0])
     out = {}
     for fam in TARGETS + ["pooled"]:
@@ -695,6 +909,11 @@ def load_member(work, tag, encoder):
     import torch
 
     m = build_model(encoder).cuda()
+    meta = json.loads((work / f"ckpt-{tag}/best.json").read_text())
+    if meta["cfg"]["dataset_fingerprint"] != verify_prepared(work):
+        raise ValueError(f"ckpt-{tag} was trained on a different prepared dataset")
+    if meta["sha256"] != fsha(work / f"ckpt-{tag}/best.pt") or meta["cfg"]["encoder"] != encoder:
+        raise ValueError(f"ckpt-{tag}/best.pt does not match its binding record")
     m.load_state_dict(torch.load(work / f"ckpt-{tag}/best.pt", map_location="cpu"))
     return m.eval()
 
@@ -725,6 +944,8 @@ def select(work, cands):
         mtr = dev_metric(rows, sc)
         table.append({"members": opt, **mtr})
     best = max(table, key=lambda r: (r["key"], r["pooled"], -len(r["members"])))
+    if not best["sufficient"]:
+        raise ValueError(f"Development coverage insufficient for selection: {best['insufficient']}")
     sel = {"made": now(), "rule": select.__doc__, "options": table, "primary": best["members"],
            "members": [m for m in members if m["tag"] in best["members"]]}
     (work / "selection.json").write_text(json.dumps(sel, indent=1))
@@ -858,7 +1079,11 @@ def evaluate(work, encoder=None):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("phase", choices=["prep", "audit", "train", "select", "calibrate", "signoff", "evaluate"])
+    p.add_argument("phase", choices=["prep", "verify", "preflight", "audit", "train", "select", "calibrate",
+                                      "signoff", "evaluate"])
+    p.add_argument("--include-voxenes", action="store_true", help="off for the primary run (no speaker lineage)")
+    p.add_argument("--stop-after", type=int, help="smoke test: stop after this step to test resume")
+    p.add_argument("--skip-preflight", action="store_true", help="smoke test on a tiny dataset only")
     p.add_argument("--tag", default="c2")
     p.add_argument("--freeze-below", type=int, default=0)
     p.add_argument("--cands", nargs="+", help="tag=encoder ...")
@@ -879,12 +1104,17 @@ def main():
     a = p.parse_args()
     a.work.mkdir(parents=True, exist_ok=True)
     if a.phase == "prep":
-        r = prep(a.raw, a.work, a.mailabs, a.workers, a.hindi)
+        r = prep(a.raw, a.work, a.mailabs, a.workers, a.hindi, a.include_voxenes)
+    elif a.phase == "verify":
+        r = {"fingerprint": verify_prepared(a.work)}
+    elif a.phase == "preflight":
+        verify_prepared(a.work)
+        r = preflight(a.work)
     elif a.phase == "audit":
         r = audit(a.work)
     elif a.phase == "train":
         r = train(a.work, a.drive, a.encoder, a.steps, a.batch, a.workers, a.lr_enc, a.lr_head, a.eval_every,
-                  a.tag, a.freeze_below)
+                  a.tag, a.freeze_below, a.stop_after, a.skip_preflight)
     elif a.phase == "select":
         r = select(a.work, [tuple(c.split("=", 1)) for c in a.cands])
     elif a.phase == "calibrate":
