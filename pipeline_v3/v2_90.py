@@ -680,6 +680,8 @@ def evaluate(work, encoder):
                 cells[r["family"] if r["label"] else "genuine"][r["speaker"]].append(int(v >= c))
                 if not r["label"]:
                     cells["genuine/" + r["source"]][r["speaker"]].append(int(v >= c))
+                    if r["source"] in ("librittsr", "vctk", "globe"):
+                        cells["genuine_read_only"][r["speaker"]].append(int(v >= c))
             t = {}
             for k, cl in sorted(cells.items()):
                 flat = [x for v in cl.values() for x in v]
