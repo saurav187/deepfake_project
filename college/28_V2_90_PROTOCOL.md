@@ -202,6 +202,83 @@ The owner states this is the final model and asks for the widest coverage. Addit
   source speaker's genuine audio may fall in another split. This is content overlap, not
   identity overlap, and is noted.
 
+## Amendment 6 (26 Nov, ~22:15 IST, before any V2-90 data was preprocessed or scored)
+
+This amendment follows the Codex review of commit `26ff20f`. It aligns the protocol with the
+code at commit `e9a0229` and later.
+
+**Actual split rules.** These supersede the earlier text where they differ.
+
+| Source | Role | Split unit and rule |
+|---|---|---|
+| MLAAD (all folders) | fakes | en_US originals: train, with dev when `sha256(original)%10==0`. en_UK originals: test, for the four targets and the Hindi folders only. Stock-voice families use voice half A for train/dev and half B for test. German EL-v3: train/dev only. One fake per (family, original) |
+| LibriTTS (original) | genuine | train-clean-100 → train (dev by speaker hash); dev-clean/other → calibration; test-clean/other → test |
+| VCTK | genuine | by speaker: `%10<6` train, 6–7 calibration, 8–9 test. One recording per (speaker, text_id) when the column exists |
+| AMI (IHM + SDM) | genuine | by **connected component of meetings and speakers**, so all mic views of a meeting and every meeting a speaker attends stay in one split. `%5`: 0 test, 1 calibration, else train. One recording per (meeting, speaker, begin time), so IHM and SDM siblings are not double-counted |
+| EdAcc | genuine | by **conversation** (`EDACC-Cxx`). `%5`: 0 test, 1 calibration, else train |
+| M-AILABS en_US | genuine | train/dev only, by reader |
+| IndieFake subset | both | 13 speakers test; the rest by speaker: `%10==0` dev, `==1` calibration genuine, else train |
+| Kathbath / IndicVoices / IndicSynth | Hindi | by speaker, `%10`: {0,1} test, 2 calibration, 3 dev, else train. IndicSynth uses the Kathbath target speaker |
+
+- **Removed.** LibriSpeech-dev 841 was never loaded. LibriTTS-R and GLOBE v2 are excluded
+  (amendment 5).
+- **VoxENES.** Excluded from the primary run (`--include-voxenes` is off). It has no source or
+  target speaker lineage, so it cannot be checked against the reserved LibriTTS/LibriSpeech
+  readers.
+
+**Integrity checks (prep fails if any is non-zero):**
+
+- duplicate recording ids;
+- repeated originals within a family;
+- any recording parent, split group, or genuine speaker present in more than one split;
+- test fake parents in train/dev;
+- test/calibration genuine speakers in train/dev;
+- calibration/test genuine speaker overlap;
+- stock voices of the test half seen in train/dev.
+
+**Prepared data.**
+
+- Prep is staged in a run directory.
+- `PREPARED.json` is written only after every shard's row count, row→audio references and
+  sha256 are verified. It is then swapped in atomically, and a previous set is moved aside.
+- Train, select and finish re-verify it.
+- Checkpoints carry the dataset fingerprint and the candidate configuration. Resume with
+  anything different fails.
+
+**Minimum coverage (preflight; training and selection refused below these).**
+
+| Split | Fakes per target family (unique parents) | English genuine |
+|---|---|---|
+| train | 200 | 3,000 recordings / 100 speakers |
+| dev | 25 | 200 / 20 |
+| cal | — | 500 / 50 |
+| test | 100 | 500 / 60 |
+
+- A development metric with any target family below the dev minimum is *insufficient*. It can
+  never be selected.
+- A held-out test cell below its minimum makes the verdict **INSUFFICIENT**.
+
+**Shortcut audit (advisory, unchanged policy).** Probes:
+
+- original duration and native sample rate, recorded before cropping;
+- RMS, roll-off, upper-band energy, tilt, speech ratio and ZCR on the treated crop;
+- the joint probe.
+
+Findings are reproduced in the final report.
+
+**Unresolved identities, stated in advance.**
+
+- MLAAD Chatterbox and FishTTS: one unnamed voice each.
+- ElevenLabs/Gemini: stock voice names only.
+- IndieFake: speaker labels from the publisher folders.
+- VCTK and LibriTTS: speaker ids only. Overlap with release v1's ASVspoof 5 (MLS) speakers
+  cannot be checked.
+
+**Matched genuine/fake panel.** The en_UK test fakes' parents (M-AILABS en_UK, Elizabeth Klett)
+are not on Drive, so no matched test panel exists. Fake detection is therefore measured on the
+current familiar-family, unseen-text/voice panel. Genuine FA is measured on independent
+corpora, and the claim is limited accordingly.
+
 ## Amendment 5 (26 Nov, ~21:00 IST, before any V2-90 data was preprocessed or scored)
 
 Reliability review of the genuine sources (owner: "reliable and modern data; fix V1's mistakes").
