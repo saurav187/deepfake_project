@@ -118,7 +118,7 @@ def mlaad_rows(raw):
 
 
 def genuine_split(corpus, spk, part):
-    if corpus == "librittsr":
+    if corpus in ("librittsr", "libritts"):
         return {"train.clean.100": "train", "dev.clean": "cal", "dev.other": "cal",
                 "test.clean": "test", "test.other": "test"}[part]
     if corpus == "vctk":
@@ -128,6 +128,9 @@ def genuine_split(corpus, spk, part):
         return "test" if part == "test" else "train"
     if corpus == "mailabs":
         return "train"
+    if corpus == "edacc":  # conversational, ~40 accents; split by speaker
+        b = h("edacc/" + spk) % 5
+        return "test" if b == 0 else ("cal" if b == 1 else "train")
     if corpus == "ami":  # by speaker across official folds, so no AMI speaker spans train and test
         b = h("ami/" + spk) % 5
         return "test" if b == 0 else ("cal" if b == 1 else "train")
@@ -153,9 +156,10 @@ def iter_genuine(raw):
     """Yield (uid, corpus, split, speaker, raw bytes) for all genuine sources."""
     import pyarrow.parquet as pq
 
-    for corpus in ("librittsr", "vctk", "globe", "ami"):
+    # LibriTTS-R and GLOBE v2 are excluded (neural restoration / enhancement + upsampling: not clean genuine).
+    for corpus in ("libritts", "vctk", "ami", "edacc"):
         for p in sorted((raw / corpus).rglob("*.parquet")):
-            part = p.parent.name if corpus == "librittsr" else ("test" if p.name.startswith("test") else "train")
+            part = p.parent.name if corpus == "libritts" else ("test" if p.name.startswith("test") else "train")
             if corpus == "ami":
                 part = p.parent.name  # ihm (headset) / sdm (distant mic): recorded per row below
             pf = pq.ParquetFile(p)
@@ -802,7 +806,7 @@ def evaluate(work, encoder=None):
                 cells[r["family"] if r["label"] else ("genuine_hindi" if hindi_gen else "genuine")][r["speaker"]].append(int(v >= c))
                 if not r["label"]:
                     cells["genuine/" + r["source"]][r["speaker"]].append(int(v >= c))
-                    if r["source"] in ("librittsr", "vctk", "globe"):
+                    if r["source"] in ("libritts", "vctk"):
                         cells["genuine_read_only"][r["speaker"]].append(int(v >= c))
             t = {}
             for k, cl in sorted(cells.items()):

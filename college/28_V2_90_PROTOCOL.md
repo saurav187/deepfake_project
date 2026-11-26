@@ -201,3 +201,25 @@ The owner states this is the final model and asks for the widest coverage. Addit
 - **Known caveat.** An IndicSynth FreeVC fake converts a *source* speaker's utterance. The
   source speaker's genuine audio may fall in another split. This is content overlap, not
   identity overlap, and is noted.
+
+## Amendment 5 (26 Nov, ~21:00 IST, before any V2-90 data was preprocessed or scored)
+
+Reliability review of the genuine sources (owner: "reliable and modern data; fix V1's mistakes").
+Two sources are **not clean genuine** and are removed from every split:
+
+- **LibriTTS-R.** Restored by Miipher, a neural vocoder-based restoration model.
+- **GLOBE v2.** "Enhanced" and super-sampled to 44.1 kHz.
+
+Neural processing leaves synthetic traces on "genuine" labels. That would teach the detector
+that vocoder artifacts mean *real*. Replacements, unprocessed:
+
+- **LibriTTS (original, `mythicinfinity/libritts`, CC BY 4.0).** Same train-clean-100 / dev /
+  test roles as LibriTTS-R had.
+- **EdAcc (`edinburghcstr/edacc`).** Edinburgh International Accents of English: conversational
+  recordings across ~40 accents. Split by speaker: `sha256("edacc/"+spk)%5` = 0 test, 1
+  calibration, else train.
+
+The read-speech-only pool becomes LibriTTS + VCTK. VoxENES (Kaggle, CC BY 4.0) is added for
+modern voice conversion (Seed-VC, OpenVoice v2, RVC v2), **training only**. Any fake whose
+target or source speaker is a LibriTTS/LibriSpeech test or calibration speaker is excluded,
+and so is all VoxENES bona fide audio whose speaker cannot be shown disjoint.

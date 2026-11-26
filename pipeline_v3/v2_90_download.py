@@ -39,6 +39,11 @@ DIVERSE = [
 HINDI_MLAAD = ["IndicF5", "Indri-TTS-0.1", "OmniVoice", "Ringg Squirrel TTS v1.0", "Veena", "VoxCPM2", "Voxtral",
                "tts_models_multilingual_multi-dataset_bark", "tts_models_multilingual_multi-dataset_xtts_v2"]
 EXTRA_MLAAD = ["RVC"]  # voice conversion (training only, en_US rows)
+FIX_GENUINE = {  # unprocessed replacements for LibriTTS-R (neural restoration) and GLOBE v2 (enhanced, upsampled)
+    "libritts": ("mythicinfinity/libritts", ["data/dev.clean/*", "data/dev.other/*", "data/test.clean/*",
+                                             "data/test.other/*", "data/train.clean.100/*"]),
+    "edacc": ("edinburghcstr/edacc", ["data/*"]),
+}
 EXTRA_GENUINE = {"ami": ("edinburghcstr/ami", ["ihm/test-*", "ihm/train-0000[0-5]-*", "sdm/test-*"])}
 GENUINE = {
     "librittsr": ("mythicinfinity/libritts_r", ["data/dev.clean/*", "data/dev.other/*", "data/test.clean/*",
@@ -88,7 +93,7 @@ def main():
 
     # parallel MLAAD modes: "rel" (related folders), "divA"/"divB" (diverse halves)
     par = only in ("rel", "divA", "divB")
-    for folder in (ON_DRIVE if only not in ("genuine", "extra") and not par else []):
+    for folder in (ON_DRIVE if only not in ("genuine", "extra", "fix") and not par else []):
         rel = f"mlaad/{folder}.tar"
         if rel not in done:
             pack(drive_mlaad / folder, folder, rel)
@@ -104,7 +109,7 @@ def main():
     import csv as _csv
     import hashlib as _h
     half = DIVERSE_N // 2
-    div = {"more": [], "extra": EXTRA_MLAAD, "divA": DIVERSE[:half], "divB": DIVERSE[half:DIVERSE_N], "genuine": [],
+    div = {"fix": [], "more": [], "extra": EXTRA_MLAAD, "divA": DIVERSE[:half], "divB": DIVERSE[half:DIVERSE_N], "genuine": [],
            "rel": []}.get(only, DIVERSE[:DIVERSE_N])
     for folder in div:
         rel = f"mlaad/{folder}.tar"
@@ -147,7 +152,7 @@ def main():
                     f.unlink()
             pack(src, stem, rel)
             shutil.rmtree(src)
-    gen = EXTRA_GENUINE if only == "extra" else (GENUINE if only in ("genuine", "all") else {})
+    gen = FIX_GENUINE if only == "fix" else EXTRA_GENUINE if only == "extra" else (GENUINE if only in ("genuine", "all") else {})
     for name, (repo, pats) in gen.items():
         d = scratch / name
         snapshot_download(repo, repo_type="dataset", local_dir=d, allow_patterns=pats, max_workers=16)
