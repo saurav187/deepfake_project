@@ -209,12 +209,13 @@ def iter_genuine(raw):
                     return t.column(c).to_pylist() if c in cols else None
 
                 ids, text_id, meet, begin = col("id"), col("text_id"), col("meeting_id"), col("begin_time")
+                aid = col("audio_id")
                 for i, (a, s) in enumerate(zip(t.column(ac).to_pylist(), t.column(sc).to_pylist())):
                     s = str(s)
                     uid = f"{corpus}/{s}/{ids[i] if ids else (a.get('path') or f'{p.stem}-{rg}-{i}')}"
                     parent, group = uid, s
-                    if corpus == "ami":
-                        uid = f"ami-{part}/{s}/{ids[i] if ids else i}"
+                    if corpus == "ami":  # unique segment id; positional fallback includes file and row group
+                        uid = f"ami-{part}/{s}/{aid[i] if aid else (ids[i] if ids else f'{p.stem}-{rg}-{i}')}"
                         parent = f"ami/{meet[i]}/{s}/{begin[i]}"  # IHM and SDM views of one segment
                         group = comp["m:" + str(meet[i])]
                     elif corpus == "vctk" and text_id:
@@ -381,6 +382,10 @@ def prep(raw, work, mailabs_tgz, workers, hindi_root=None, include_voxenes=False
                     if split == "train" and h(f"{corpus}/{group}") % 10 == 0:
                         split = "dev"
                     k = (corpus, split, spk)
+                    if uid in meta or uid in seen_uid:  # never let a repeated id crash or alias another row
+                        excl[f"{split}|genuine/{corpus}|duplicate_uid"] += 1
+                        continue
+                    seen_uid.add(uid)
                     if (corpus, parent) in seen_parent:  # one recording per condition (mic siblings dropped)
                         excl[f"{split}|genuine/{corpus}|duplicate_parent"] += 1
                         continue
@@ -394,7 +399,7 @@ def prep(raw, work, mailabs_tgz, workers, hindi_root=None, include_voxenes=False
                                      group=f"{corpus}:{group}", locator="")
                     yield uid, b
 
-        meta, seen_parent = {}, set()
+        meta, seen_parent, seen_uid = {}, set(), set()
         itp = raw / "indiefake" / "indiefake.tar"
 
         def admit_all():
