@@ -127,3 +127,9 @@ speakers.
   neural vocoder, which may raise FA. This is reported per source.
 - A Chatterbox watermark (Perth) may be a learnable cue. It is acceptable for detecting the
   family but is noted.
+
+## Amendment 1 (26 Nov, ~19:05 IST, before any V2-90 data was preprocessed or scored)
+
+Colab's ffmpeg lacks an AMR-NB encoder. The held-out unseen call codec is therefore
+**G.726 32 kbps (8 kHz)** instead of AMR-NB, both in training (excluded) and in evaluation.
+Evaluation channels: clean, G.711 µ-law 8 kHz, G.726 (unseen), Opus 12 kbps, GSM.

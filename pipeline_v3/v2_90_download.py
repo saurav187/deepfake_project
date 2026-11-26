@@ -23,6 +23,9 @@ TARGET_RELATED = [
     "FishTTS", "Fish-S2-Pro", "Openaudio-S1-Mini",
     "Gemini-3.1-Flash-TTS",
 ]
+ON_DRIVE = ["Chatterbox", "ElevenLabs-v3", "FishTTS", "Gemini-3.1-Flash-TTS"]  # development/mlaad copy
+DIVERSE_PER_FOLDER = 300  # en_US rows only (training never uses en_UK of non-target folders)
+DIVERSE_N = 20
 DIVERSE = [
     "Cartesia.ai (Sonic-3)", "DeepGram", "Edge-TTS", "OpenAI TTS-1 HD", "minimax_speech-2.6-hd",
     "minimax_speech-02-turbo", "Inworld-TTS-2", "Rime-Coda", "Smallest-Lightning-v3.1", "Kyutai-TTS",
@@ -48,9 +51,10 @@ def sha(p):
 
 def main():
     out = Path(sys.argv[1])
-    scratch = Path("/content/v290-scratch")
+    only = sys.argv[2] if len(sys.argv) > 2 else "all"
+    scratch = Path(f"/content/v290-scratch-{only}")
     out.mkdir(parents=True, exist_ok=True)
-    sums = out / "SHA256SUMS"
+    sums = out / f"SHA256SUMS.{only}"
     done = {l.split("  ", 1)[1] for l in sums.read_text().splitlines()} if sums.exists() else set()
 
     def publish(local, rel):
@@ -67,22 +71,52 @@ def main():
         done.add(rel)
 
     t0 = time.time()
-    for folder in TARGET_RELATED + DIVERSE:
+    drive_mlaad = Path("/content/drive/MyDrive/audio-v3/development/mlaad/fake/en")
+
+    def pack(src, folder, rel):
+        tpath = scratch / "t.tar"
+        scratch.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(tpath, "w") as t:
+            t.add(src, arcname=folder)
+        publish(tpath, rel)
+        tpath.unlink()
+        print(f"{time.time() - t0:7.0f}s mlaad {folder}", flush=True)
+
+    for folder in (ON_DRIVE if only != "genuine" else []):
+        rel = f"mlaad/{folder}.tar"
+        if rel not in done:
+            pack(drive_mlaad / folder, folder, rel)
+    for folder in [f for f in TARGET_RELATED if f not in ON_DRIVE and only != "genuine"]:
         rel = f"mlaad/{folder}.tar"
         if rel in done:
             continue
         d = scratch / "mlaad"
         snapshot_download("mueller91/MLAAD", repo_type="dataset", revision=MLAAD_REV, local_dir=d,
-                          allow_patterns=[f"fake/en/{folder}/*"], max_workers=16)
+                          allow_patterns=[f"fake/en/{folder}/*"], max_workers=8)
+        pack(d / "fake/en" / folder, folder, rel)
+        shutil.rmtree(d / "fake/en" / folder)
+    import csv as _csv
+    import hashlib as _h
+    for folder in (DIVERSE[:DIVERSE_N] if only != "genuine" else []):
+        rel = f"mlaad/{folder}.tar"
+        if rel in done:
+            continue
+        d = scratch / "mlaad"
+        m = hf_hub_download("mueller91/MLAAD", f"fake/en/{folder}/meta.csv", repo_type="dataset",
+                            revision=MLAAD_REV, local_dir=d)
+        rows = [r for r in _csv.DictReader(open(m), delimiter="|") if r["original_file"].startswith("en_US/")]
+        rows.sort(key=lambda r: _h.sha256(r["path"].encode()).hexdigest())
+        names = [r["path"].split("/")[-1] for r in rows[:DIVERSE_PER_FOLDER]]
+        snapshot_download("mueller91/MLAAD", repo_type="dataset", revision=MLAAD_REV, local_dir=d,
+                          allow_patterns=[f"fake/en/{folder}/{n}" for n in names], max_workers=8)
+        keep = set(names) | {"meta.csv"}
         src = d / "fake/en" / folder
-        tpath = scratch / "t.tar"
-        with tarfile.open(tpath, "w") as t:
-            t.add(src, arcname=folder)
-        publish(tpath, rel)
+        for f in src.iterdir():
+            if f.name not in keep:
+                f.unlink()
+        pack(src, folder, rel)
         shutil.rmtree(src)
-        tpath.unlink()
-        print(f"{time.time() - t0:7.0f}s mlaad {folder}", flush=True)
-    for name, (repo, pats) in GENUINE.items():
+    for name, (repo, pats) in (GENUINE.items() if only != "mlaad" else []):
         d = scratch / name
         snapshot_download(repo, repo_type="dataset", local_dir=d, allow_patterns=pats, max_workers=16)
         for p in sorted(d.rglob("*.parquet")):

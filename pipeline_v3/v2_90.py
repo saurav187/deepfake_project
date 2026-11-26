@@ -34,8 +34,8 @@ RELATED = {"Chatterbox": ["Chatterbox-Turbo", "Resemble.ai (April 12th, 2025)"],
            "ElevenLabs-v3": ["ElevenLabs-Turbo-v2.5", "ElevenLabs-v2-Multilingual"],
            "FishTTS": ["Fish-S2-Pro", "Openaudio-S1-Mini"], "Gemini-3.1-Flash-TTS": []}
 GEN_CAP_CORPUS, GEN_CAP_SPK, EVAL_CAP_SPK = 4000, 40, 10
-CHANNELS_EVAL = ["clean", "mulaw8k", "amrnb", "opus12", "gsm"]
-TRAIN_CODECS = ["mulaw8k", "alaw8k", "gsm", "opus8", "opus16", "opus24", "mp3"]  # AMR-NB held out
+CHANNELS_EVAL = ["clean", "mulaw8k", "g726", "opus12", "gsm"]
+TRAIN_CODECS = ["mulaw8k", "alaw8k", "gsm", "opus8", "opus16", "opus24", "mp3"]  # G.726 held out (unseen codec)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
@@ -301,7 +301,7 @@ def ffmpeg_codec(x, name):
     enc = {"mulaw8k": (["-ar", "8000", "-c:a", "pcm_mulaw", "-f", "wav"]),
            "alaw8k": (["-ar", "8000", "-c:a", "pcm_alaw", "-f", "wav"]),
            "gsm": (["-ar", "8000", "-c:a", "libgsm", "-f", "gsm"]),
-           "amrnb": (["-ar", "8000", "-c:a", "libopencore_amrnb", "-b:a", "12.2k", "-f", "amr"]),
+           "g726": (["-ar", "8000", "-c:a", "g726", "-b:a", "32k", "-f", "wav"]),
            "opus8": (["-c:a", "libopus", "-b:a", "8k", "-f", "ogg"]),
            "opus12": (["-c:a", "libopus", "-b:a", "12k", "-f", "ogg"]),
            "opus16": (["-c:a", "libopus", "-b:a", "16k", "-f", "ogg"]),
