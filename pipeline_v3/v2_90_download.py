@@ -133,7 +133,9 @@ def main():
     if only == "more":  # final-model coverage: Hindi MLAAD (9 systems, 300 each) + German ElevenLabs-v3 (all)
         import csv as _csv2
         import hashlib as _h2
-        for lang, folder, n in [("de", "ElevenLabs-v3", 1000)] + [("hi", f, 300) for f in HINDI_MLAAD]:
+        # HF throttling (~5 s/file): German EL-v3 capped at 400, Hindi = 5 most modern systems x 100
+        hi5 = ["IndicF5", "Veena", "VoxCPM2", "OmniVoice", "Voxtral"]
+        for lang, folder, n in [("de", "ElevenLabs-v3", 400)] + [("hi", f, 100) for f in hi5]:
             stem = f"{lang}__{folder}"
             rel = f"mlaad/{stem}.tar"
             if rel in done:
