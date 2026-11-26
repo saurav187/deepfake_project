@@ -11,12 +11,14 @@ _Updated as the run progresses; every number below is from real data unless mark
 | Item | State |
 |---|---|
 | Codex review of `26ff20f` | All 5 findings confirmed; fixed in `e9a0229` (pre-training) and `e538fd1` (evaluation) |
-| Tests | 10 V2-90 regression tests and 95 existing pipeline tests pass (local, Python 3.14) |
+| Tests | 100 collected tests passed locally under Python 3.14, including 11 V2-90 tests |
 | Local smoke (synthetic audio, RTX 5060) | prep → publish → preflight refuses tiny set → train interrupted at step 2 → resumed at 2 → resume with different LR refused |
-| Prep on real data (L4) | running since 21:59 IST |
-| GPU smoke on real data | pending |
+| Prep on real data (L4) | restarted at 22:16 IST on `6c3c4c9` after the earlier AMI segment ID collision |
+| GPU smoke on real data | queued on A100 after prepared report checksum, leakage checks, coverage and audit complete |
 | Full training | not started |
 | Held-out test | sealed (no sign-off yet) |
+
+At takeover, the L4 prep on `15d384a` raised `KeyError: 'ami-ihm/FEO070/34'` before publishing a prepared set. Commit `6c3c4c9` uses AMI audio IDs and guards against repeated IDs. It is deployed on both GPUs. The local regression in `4c92800` validates reused row IDs and shared microphone parents. The idle download CPU was released. The A100 smoke queue logs to `/content/codex-v290-smoke.log`.
 
 ## Review findings → fixes
 
