@@ -8,6 +8,26 @@ import pytest
 from pipeline_v3 import v2_90 as v
 
 
+@pytest.mark.parametrize(("target", "source"), [
+    ("masked_spec_embed", "mask_emb"),
+    ("feature_extractor.conv_layers.3.layer_norm.bias", "feature_extractor.conv_layers.3.2.1.bias"),
+    ("feature_projection.projection.weight", "post_extract_proj.weight"),
+    ("encoder.pos_conv_embed.conv.parametrizations.weight.original0", "encoder.pos_conv.0.weight_g"),
+    ("encoder.pos_conv_embed.conv.parametrizations.weight.original1", "encoder.pos_conv.0.weight_v"),
+    ("encoder.layers.47.attention.q_proj.bias", "encoder.layers.47.self_attn.q_proj.bias"),
+    ("encoder.layers.47.layer_norm.bias", "encoder.layers.47.self_attn_layer_norm.bias"),
+    ("encoder.layers.47.final_layer_norm.bias", "encoder.layers.47.final_layer_norm.bias"),
+    ("encoder.layers.47.feed_forward.output_dense.weight", "encoder.layers.47.fc2.weight"),
+])
+def test_antideepfake_weights_map_to_upstream_keys(target, source):
+    assert v.antideepfake_source_key(target) == "m_ssl.model." + source
+
+
+def test_cutoff_rejects_nonfinite_scores():
+    with pytest.raises(ValueError, match="non-finite"):
+        v.cutoff_at([0.0, float("nan")])
+
+
 def test_ami_segment_ids_survive_reused_row_ids_and_keep_mic_siblings(tmp_path):
     pa = pytest.importorskip("pyarrow")
     pq = pytest.importorskip("pyarrow.parquet")

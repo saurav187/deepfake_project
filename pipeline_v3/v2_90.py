@@ -690,15 +690,74 @@ class TrainStream(_stream_base()):
 
 
 # ------------------------------------------------------------------------- model
+ANTIDEEPFAKE_ENCODER = "nii-yamagishilab/xls-r-1b-anti-deepfake"
+ANTIDEEPFAKE_REVISION = "60c96543210117bdb256636e7961e16463f99291"
+
+
+def antideepfake_source_key(target):
+    """Return the upstream fairseq name for a Transformers Wav2Vec2Model tensor."""
+    if target == "masked_spec_embed":
+        return "m_ssl.model.mask_emb"
+    if target.startswith("feature_extractor.conv_layers."):
+        layer, block, parameter = target.removeprefix("feature_extractor.conv_layers.").split(".")
+        index = {"conv": "0", "layer_norm": "2.1"}[block]
+        return f"m_ssl.model.feature_extractor.conv_layers.{layer}.{index}.{parameter}"
+    prefixes = (
+        ("feature_projection.layer_norm.", "layer_norm."),
+        ("feature_projection.projection.", "post_extract_proj."),
+        ("encoder.pos_conv_embed.conv.", "encoder.pos_conv.0."),
+    )
+    for dst, src in prefixes:
+        if target.startswith(dst):
+            parameter = target.removeprefix(dst)
+            parameter = {
+                "parametrizations.weight.original0": "weight_g",
+                "parametrizations.weight.original1": "weight_v",
+            }.get(parameter, parameter)
+            return "m_ssl.model." + src + parameter
+    if target.startswith("encoder.layers."):
+        target = (target.replace(".attention.", ".self_attn.")
+                  .replace(".layer_norm.", ".self_attn_layer_norm.")
+                  .replace(".feed_forward.intermediate_dense.", ".fc1.")
+                  .replace(".feed_forward.output_dense.", ".fc2."))
+    return "m_ssl.model." + target
+
+
+def load_encoder(encoder):
+    from transformers import AutoConfig, AutoModel, Wav2Vec2Model
+
+    if encoder != ANTIDEEPFAKE_ENCODER:
+        model, info = AutoModel.from_pretrained(encoder, layerdrop=0.0, output_loading_info=True)
+        problems = {key: info[key] for key in ("missing_keys", "mismatched_keys", "error_msgs") if info.get(key)}
+        if problems:
+            raise ValueError(f"Incomplete pretrained encoder {encoder}: {problems}")
+        return model
+
+    from huggingface_hub import hf_hub_download
+    from safetensors import safe_open
+
+    config = AutoConfig.from_pretrained(encoder, revision=ANTIDEEPFAKE_REVISION, layerdrop=0.0)
+    model = Wav2Vec2Model(config)
+    weights = hf_hub_download(encoder, "model.safetensors", revision=ANTIDEEPFAKE_REVISION)
+    source_keys = {name: antideepfake_source_key(name) for name in model.state_dict()}
+    with safe_open(weights, framework="pt", device="cpu") as source:
+        missing = sorted(set(source_keys.values()) - set(source.keys()))
+        if missing:
+            raise ValueError(f"Missing AntiDeepfake encoder weights: {missing[:8]}")
+        state = {name: source.get_tensor(key) for name, key in source_keys.items()}
+        model.load_state_dict(state, strict=True)
+    print(f"Loaded {len(source_keys)} AntiDeepfake encoder tensors from {ANTIDEEPFAKE_REVISION}", flush=True)
+    return model
+
+
 def build_model(encoder, freeze_below=0):
     import torch
     from torch import nn
-    from transformers import AutoModel
 
     class Det(nn.Module):
         def __init__(self):
             super().__init__()
-            self.ssl = AutoModel.from_pretrained(encoder, layerdrop=0.0)
+            self.ssl = load_encoder(encoder)
             self.ssl.feature_extractor._freeze_parameters()
             if freeze_below:
                 for mod in [self.ssl.feature_projection] + list(self.ssl.encoder.layers[:freeze_below]):
@@ -727,7 +786,8 @@ def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_eve
         preflight(work, ("train", "dev"))
     cfg = {"dataset_fingerprint": fp, "tag": tag, "encoder": encoder, "freeze_below": freeze_below,
            "steps": steps, "batch": batch, "lr_enc": lr_enc, "lr_head": lr_head, "eval_every": eval_every,
-           "code_sha256": fsha(__file__)}
+           "code_sha256": fsha(__file__),
+           "encoder_revision": ANTIDEEPFAKE_REVISION if encoder == ANTIDEEPFAKE_ENCODER else None}
     store = Store(work, {"train"})
     dev = Store(work, {"dev"})
     rows = store.rows
@@ -775,6 +835,8 @@ def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_eve
         with torch.autocast("cuda", dtype=torch.bfloat16):
             out = model(x.cuda(non_blocking=True))
         loss = lossf(out.float(), y.cuda().float())
+        if not torch.isfinite(loss).item():
+            raise ValueError(f"Non-finite training loss at step {step + 1}")
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -816,12 +878,17 @@ def score_rows(model, store, rows, ch, bs=int(os.environ.get("V290_EVAL_BS", "64
         for i in range(0, len(rows), bs):
             xs = [channel(store.x(r), ch) for r in rows[i:i + bs]]
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                out += model(torch.from_numpy(np.stack(xs)).cuda()).float().cpu().tolist()
+                scores = model(torch.from_numpy(np.stack(xs)).cuda()).float().cpu().tolist()
+            if not all(map(math.isfinite, scores)):
+                raise ValueError(f"Non-finite {ch} scores in batch starting at row {i}")
+            out += scores
     return out
 
 
 def cutoff_at(gen_scores, fa=0.15):
     s = sorted(gen_scores, reverse=True)
+    if not all(map(math.isfinite, s)):
+        raise ValueError("Cannot set a cutoff from non-finite genuine scores")
     k = int(len(s) * fa)
     return math.nextafter(s[k], math.inf) if k < len(s) else -math.inf
 

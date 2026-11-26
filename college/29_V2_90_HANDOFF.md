@@ -13,12 +13,19 @@ _Updated as the run progresses; every number below is from real data unless mark
 | Codex review of `26ff20f` | All 5 findings confirmed; fixed in `e9a0229` (pre-training) and `e538fd1` (evaluation) |
 | Tests | 100 collected tests passed locally under Python 3.14, including 11 V2-90 tests |
 | Local smoke (synthetic audio, RTX 5060) | prep → publish → preflight refuses tiny set → train interrupted at step 2 → resumed at 2 → resume with different LR refused |
-| Prep on real data (L4) | restarted at 22:16 IST on `6c3c4c9` after the earlier AMI segment ID collision |
-| GPU smoke on real data | queued on A100 after prepared report checksum, leakage checks, coverage and audit complete |
+| Prep on real data (L4) | restarted at 22:16 IST on `6c3c4c9`, published at 22:52, coverage passed and audit completed at 22:54 |
+| GPU smoke on real data | started at 22:56:42 IST on A100 with the matching prepared fingerprint |
 | Full training | not started |
 | Held-out test | sealed (no sign-off yet) |
 
 At takeover, the L4 prep on `15d384a` raised `KeyError: 'ami-ihm/FEO070/34'` before publishing a prepared set. Commit `6c3c4c9` uses AMI audio IDs and guards against repeated IDs. It is deployed on both GPUs. The local regression in `4c92800` validates reused row IDs and shared microphone parents. The idle download CPU was released. The A100 smoke queue logs to `/content/codex-v290-smoke.log`.
+
+### Prepared set and advisory audit
+
+- Prepared fingerprint `f8eb0fe0eaf42ebe25ce4128086d3619ba349e89434e86640f93d457a3fadcea`. All split integrity checks returned zero. Preflight returned no failures.
+- Train and development unique parents by target were Chatterbox 424/49, ElevenLabs v3 247/26, FishTTS 447/54, and Gemini 276/31. English genuine coverage was 5,254 recordings from 276 speakers in train, 600 from 32 in development, and 634 from 126 in calibration.
+- Joint audit AUC flagged Chatterbox (0.8218), ElevenLabs v3 (0.8898), FishTTS (0.8126), and Gemini (0.8823). ElevenLabs v3 also flagged spectral tilt (0.8215) and zero-crossing rate (0.8730). Gemini flagged spectral tilt (0.8291) and zero-crossing rate (0.8178). Original duration and native sample rate had no target-family flags above 0.80.
+- The first smoke launcher inherited a working directory replaced during redeployment and failed before training. The relaunched smoke job opened the current code directory after verification. It uses the same gate, prepared set and candidate configuration.
 
 ## Review findings → fixes
 
