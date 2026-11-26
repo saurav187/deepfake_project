@@ -28,15 +28,24 @@ case "${1:?phase}" in
     log "prep done"
     ;;
   train)
+    # TAG, ENCODER, FREEZE_BELOW, BATCH, STEPS, LR_ENC via env
+    TAG=${TAG:-c2}
     [ -d "$W/shards" ] || rsync -a "$D/shards/" "$W/shards/"
-    if [ ! -f "$W/ckpt/last.pt" ] && [ -f "$D/ckpt/last.pt" ]; then mkdir -p "$W/ckpt"; cp "$D/ckpt/last.pt" "$W/ckpt/"; fi
-    log "train start"
-    python3 -u -m pipeline_v3.v2_90 train --work "$W" --drive "$D" --steps "${STEPS:-6000}" --batch "${BATCH:-32}" \
-      --eval-every "${EVAL_EVERY:-1000}" --workers "$(($(nproc) - 1))" 2>&1 | tee -a "$D/run/train.log"
-    cp "$W/ckpt/last.pt" "$D/ckpt/last.pt"
-    log "train done"
+    if [ ! -f "$W/ckpt-$TAG/last.pt" ] && [ -f "$D/ckpt-$TAG/last.pt" ]; then mkdir -p "$W/ckpt-$TAG"; cp "$D/ckpt-$TAG/last.pt" "$W/ckpt-$TAG/"; fi
+    log "train $TAG start (${ENCODER:-facebook/wav2vec2-xls-r-300m})"
+    python3 -u -m pipeline_v3.v2_90 train --work "$W" --drive "$D" --tag "$TAG" \
+      --encoder "${ENCODER:-facebook/wav2vec2-xls-r-300m}" --freeze-below "${FREEZE_BELOW:-0}" \
+      --steps "${STEPS:-6000}" --batch "${BATCH:-32}" --lr-enc "${LR_ENC:-2e-5}" \
+      --eval-every "${EVAL_EVERY:-1000}" --workers "$(($(nproc) - 1))" 2>&1 | tee -a "$D/run/train-$TAG.log"
+    log "train $TAG done"
     ;;
   finish)
+    # CANDS="c2=facebook/wav2vec2-xls-r-300m c3=nii-yamagishilab/xls-r-1b-anti-deepfake"
+    [ -d "$W/shards" ] || rsync -a "$D/shards/" "$W/shards/"
+    for c in $CANDS; do t=${c%%=*}; mkdir -p "$W/ckpt-$t"; [ -f "$W/ckpt-$t/best.pt" ] || cp "$D/ckpt-$t/best.pt" "$W/ckpt-$t/"; done
+    log "select"
+    python3 -u -m pipeline_v3.v2_90 select --work "$W" --cands $CANDS 2>&1 | tee "$D/run/select.log"
+    cp "$W/selection.json" "$D/run/"
     log "calibrate"
     python3 -u -m pipeline_v3.v2_90 calibrate --work "$W" 2>&1 | tee "$D/run/calibrate.log"
     cp "$W/cutoff.json" "$D/run/"

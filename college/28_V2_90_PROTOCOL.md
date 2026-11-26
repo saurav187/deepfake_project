@@ -153,3 +153,25 @@ system are added.
 **Primary genuine FA** is now pooled over *all* test genuine sources: LibriTTS-R, VCTK, GLOBE,
 AMI and IndieFake. It is also reported per source, plus a "read speech only" pool (LibriTTS-R,
 VCTK, GLOBE). The calibration pool adds the AMI and IndieFake calibration speakers.
+
+## Amendment 3 (26 Nov, ~19:45 IST, before any V2-90 data was preprocessed or scored)
+
+The owner authorised extra steps and compute to reach the target. Candidates, all trained on
+the same train split with the same sampler and augmentation:
+
+- **C2.** `facebook/wav2vec2-xls-r-300m`, full fine-tune (CNN frozen), batch 32.
+- **C3.** `nii-yamagishilab/xls-r-1b-anti-deepfake`, an XLS-R-1B encoder post-trained for
+  deepfake detection (CC BY-NC-SA). The bottom 24 of its 48 layers are frozen, batch 16. Only
+  the encoder is used; a new head is trained.
+- **C4.** The equal-weight mean of C2 and C3 z-scores, with z from development genuine
+  mean/sd.
+
+**Selection (`v2_90.py select`).**
+
+- Score development (clean) with each option.
+- Pick the maximum of the minimum-over-target-families detection at the development genuine 15%
+  cutoff.
+- Ties go to the higher pooled detection, then to fewer members.
+
+The chosen option is frozen in `selection.json` before calibration. Calibration, sign-off and
+evaluation use it unchanged. C1 (frozen-feature head) is dropped.

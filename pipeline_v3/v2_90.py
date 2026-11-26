@@ -400,7 +400,7 @@ class TrainStream(_stream_base()):
 
 
 # ------------------------------------------------------------------------- model
-def build_model(encoder):
+def build_model(encoder, freeze_below=0):
     import torch
     from torch import nn
     from transformers import AutoModel
@@ -410,6 +410,9 @@ def build_model(encoder):
             super().__init__()
             self.ssl = AutoModel.from_pretrained(encoder, layerdrop=0.0)
             self.ssl.feature_extractor._freeze_parameters()
+            if freeze_below:
+                for mod in [self.ssl.feature_projection] + list(self.ssl.encoder.layers[:freeze_below]):
+                    mod.requires_grad_(False)
             n = self.ssl.config.num_hidden_layers + 1
             self.w = nn.Parameter(torch.zeros(n))
             d = self.ssl.config.hidden_size
@@ -424,7 +427,7 @@ def build_model(encoder):
     return Det()
 
 
-def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_every):
+def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_every, tag="c2", freeze_below=0):
     import torch
     from torch.utils.data import DataLoader, IterableDataset
 
@@ -447,12 +450,12 @@ def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_eve
     ds = TrainStream(work, [groups[k] for k in keys], probs)
     dl = iter(DataLoader(ds, batch_size=batch, num_workers=workers, prefetch_factor=4, persistent_workers=True))
     dev_rows = dev.rows
-    model = build_model(encoder).cuda()
+    model = build_model(encoder, freeze_below).cuda()
     enc_params = [p for n, p in model.named_parameters() if n.startswith("ssl.") and p.requires_grad]
     opt = torch.optim.AdamW([{"params": enc_params, "lr": lr_enc},
                              {"params": list(model.head.parameters()) + [model.w], "lr": lr_head}], weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[lr_enc, lr_head], total_steps=steps, pct_start=0.08)
-    ck = work / "ckpt"
+    ck = work / f"ckpt-{tag}"
     ck.mkdir(exist_ok=True)
     start, best, hist = 0, None, []
     if (ck / "last.pt").exists():
@@ -487,8 +490,9 @@ def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_eve
             torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "sched": sched.state_dict(),
                         "step": step + 1, "best": best, "hist": hist}, ck / "last.tmp")
             os.replace(ck / "last.tmp", ck / "last.pt")
-            (work / "train.json").write_text(json.dumps({"best": best, "hist": hist}, indent=1))
-            mirror(work, drive, ["train.json", "ckpt/best.pt"])
+            (work / f"train-{tag}.json").write_text(json.dumps({"tag": tag, "encoder": encoder, "best": best,
+                                                                "hist": hist}, indent=1))
+            mirror(work, drive, [f"train-{tag}.json", f"ckpt-{tag}/best.pt", f"ckpt-{tag}/last.pt"])
     return best
 
 
@@ -590,23 +594,69 @@ def audit(work):
 
 
 # ------------------------------------------------------------------------- calibrate / signoff / evaluate
-def load_best(work, encoder):
+def load_member(work, tag, encoder):
     import torch
 
     m = build_model(encoder).cuda()
-    m.load_state_dict(torch.load(work / "ckpt/best.pt", map_location="cpu"))
+    m.load_state_dict(torch.load(work / f"ckpt-{tag}/best.pt", map_location="cpu"))
     return m.eval()
 
 
-def calibrate(work, encoder):
+def zstats(v):
+    return float(np.mean(v)), float(np.std(v) or 1.0)
+
+
+def select(work, cands):
+    """Prespecified (protocol 28 amendment 3): score development with each fine-tuned candidate and the
+    equal-weight z-mean of all; z uses development genuine mean/sd. Pick max of min-family detection at the
+    development 15% cutoff; ties -> higher pooled detection -> fewer members."""
+    dev = Store(work, {"dev"})
+    rows = dev.rows
+    gen = [i for i, r in enumerate(rows) if r["label"] == 0]
+    members, z = [], {}
+    for tag, enc in cands:
+        m = load_member(work, tag, enc)
+        sc = np.array(score_rows(m, dev, rows, "clean"))
+        mu, sd = zstats(sc[gen])
+        z[tag] = (sc - mu) / sd
+        members.append({"tag": tag, "encoder": enc, "sha256": fsha(work / f"ckpt-{tag}/best.pt"), "mu": mu, "sd": sd})
+        del m
+    options = [[t] for t, _ in cands] + ([[t for t, _ in cands]] if len(cands) > 1 else [])
+    table = []
+    for opt in options:
+        sc = np.mean([z[t] for t in opt], 0).tolist()
+        mtr = dev_metric(rows, sc)
+        table.append({"members": opt, **mtr})
+    best = max(table, key=lambda r: (r["key"], r["pooled"], -len(r["members"])))
+    sel = {"made": now(), "rule": select.__doc__, "options": table, "primary": best["members"],
+           "members": [m for m in members if m["tag"] in best["members"]]}
+    (work / "selection.json").write_text(json.dumps(sel, indent=1))
+    return sel
+
+
+class Scorer:
+    def __init__(self, work):
+        self.sel = json.loads((work / "selection.json").read_text())
+        self.ms = []
+        for m in self.sel["members"]:
+            if fsha(work / f"ckpt-{m['tag']}/best.pt") != m["sha256"]:
+                raise ValueError(f"member {m['tag']} changed after selection")
+            self.ms.append((load_member(work, m["tag"], m["encoder"]), m["mu"], m["sd"]))
+        self.sha = fsha(work / "selection.json")
+
+    def __call__(self, store, rows, ch):
+        return np.mean([(np.array(score_rows(m, store, rows, ch)) - mu) / sd for m, mu, sd in self.ms], 0).tolist()
+
+
+def calibrate(work, encoder=None):
     st = Store(work, {"cal"})
     gen = [r for r in st.rows if r["label"] == 0]
-    m = load_best(work, encoder)
-    sc = score_rows(m, st, gen, "clean")
+    scorer = Scorer(work)
+    sc = scorer(st, gen, "clean")
     c = cutoff_at(sc)
     by = Counter(r["source"] for r in gen)
     fl = Counter(r["source"] for r, s in zip(gen, sc) if s >= c)
-    rep = {"made": now(), "model_sha256": fsha(work / "ckpt/best.pt"), "cutoff": c,
+    rep = {"made": now(), "model_sha256": scorer.sha, "primary": scorer.sel["primary"], "cutoff": c,
            "rule": "lowest cutoff with <= floor(0.15 n) calibration genuine flagged (clean); flag if score >= cutoff",
            "flagged": f"{sum(s >= c for s in sc)}/{len(sc)}", "by_source": {k: f"{fl[k]}/{n}" for k, n in by.items()},
            "speakers": len({r["speaker"] for r in gen})}
@@ -623,7 +673,7 @@ def signoff(work, protocol, commit):
     test = sorted(load_manifest(work, {"test"}), key=lambda r: r["uid"])
     tm = hashlib.sha256("\n".join(f"{r['uid']}|{r['label']}|{r['family']}|{r['speaker']}" for r in test).encode()).hexdigest()
     cut = json.loads((work / "cutoff.json").read_text())
-    if cut["model_sha256"] != fsha(work / "ckpt/best.pt"):
+    if cut["model_sha256"] != fsha(work / "selection.json"):
         raise ValueError("model changed after calibration")
     rec = {"signed": now(), "protocol_sha256": fsha(protocol), "code_commit": commit, "code_sha256": fsha(__file__),
            "model_sha256": cut["model_sha256"], "cutoff": cut["cutoff"], "test_manifest_sha256": tm,
@@ -658,21 +708,21 @@ def boot(cl, B=2000, seed=20261126):
     return [round(v[int(0.025 * B)], 4), round(v[int(0.975 * B) - 1], 4)]
 
 
-def evaluate(work, encoder):
+def evaluate(work, encoder=None):
     s = json.loads((work / "signoff.json").read_text())
-    if fsha(work / "ckpt/best.pt") != s["model_sha256"]:
+    if fsha(work / "selection.json") != s["model_sha256"]:
         raise ValueError("model changed after signoff")
     st = Store(work, {"test"})
     rows = sorted(st.rows, key=lambda r: r["uid"])
     tm = hashlib.sha256("\n".join(f"{r['uid']}|{r['label']}|{r['family']}|{r['speaker']}" for r in rows).encode()).hexdigest()
     if tm != s["test_manifest_sha256"]:
         raise ValueError("test manifest changed after signoff")
-    m = load_best(work, encoder)
+    scorer = Scorer(work)
     c = s["cutoff"]
     res = {"signoff_sha256": fsha(work / "signoff.json"), "evaluated": now(), "cutoff": c, "channels": {}}
     with (work / "eval-scores.jsonl").open("w") as f:
         for ch in CHANNELS_EVAL:
-            sc = score_rows(m, st, rows, ch)
+            sc = scorer(st, rows, ch)
             for r, v in zip(rows, sc):
                 f.write(json.dumps({"uid": r["uid"], "channel": ch, "score": v}) + "\n")
             cells = defaultdict(lambda: defaultdict(list))
@@ -710,7 +760,10 @@ def evaluate(work, encoder):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("phase", choices=["prep", "audit", "train", "calibrate", "signoff", "evaluate"])
+    p.add_argument("phase", choices=["prep", "audit", "train", "select", "calibrate", "signoff", "evaluate"])
+    p.add_argument("--tag", default="c2")
+    p.add_argument("--freeze-below", type=int, default=0)
+    p.add_argument("--cands", nargs="+", help="tag=encoder ...")
     p.add_argument("--raw", type=Path)
     p.add_argument("--work", type=Path, required=True)
     p.add_argument("--drive", type=Path)
@@ -731,7 +784,10 @@ def main():
     elif a.phase == "audit":
         r = audit(a.work)
     elif a.phase == "train":
-        r = train(a.work, a.drive, a.encoder, a.steps, a.batch, a.workers, a.lr_enc, a.lr_head, a.eval_every)
+        r = train(a.work, a.drive, a.encoder, a.steps, a.batch, a.workers, a.lr_enc, a.lr_head, a.eval_every,
+                  a.tag, a.freeze_below)
+    elif a.phase == "select":
+        r = select(a.work, [tuple(c.split("=", 1)) for c in a.cands])
     elif a.phase == "calibrate":
         r = calibrate(a.work, a.encoder)
     elif a.phase == "signoff":
