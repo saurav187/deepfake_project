@@ -129,7 +129,7 @@ def genuine_split(corpus, spk, part):
     if corpus == "mailabs":
         return "train"
     if corpus == "edacc":  # conversational, ~40 accents; split by speaker
-        b = h("edacc/" + spk) % 5
+        b = h("edacc/" + spk.rsplit("-", 1)[0]) % 5  # by conversation (EDACC-C08-A/B share a recording)
         return "test" if b == 0 else ("cal" if b == 1 else "train")
     if corpus == "ami":  # by speaker across official folds, so no AMI speaker spans train and test
         b = h("ami/" + spk) % 5
