@@ -215,6 +215,22 @@ def iter_hindi(root, kathbath_shards=8):
                     yield uid, corpus, hindi_split(s), s, g, a["bytes"]
 
 
+def iter_voxenes(zp):
+    """VoxENES 2026 'original' fakes only (VC: seed_vc, openvoice_v2, rvc_v2; TTS: 2025 systems), training/dev.
+    Bona fide and the publisher's augmented copies are skipped (no speaker metadata; own augmentation used)."""
+    import zipfile
+
+    with zipfile.ZipFile(zp) as z:
+        for n in sorted(z.namelist()):
+            parts = n.split("/")
+            if len(parts) < 5 or parts[2] != "original" or not n.endswith((".flac", ".wav", ".mp3")):
+                continue
+            kind, system = parts[1], parts[3]
+            split = "dev" if h(n) % 10 == 0 else "train"
+            yield dict(uid=f"voxenes/{n}", split=split, label=1, family=f"VoxENES/{kind}/{system}",
+                       source="voxenes", speaker=f"voxenes:{system}", parent=f"voxenes/{n}", locator=""), z.read(n)
+
+
 def iter_indiefake(tp):
     """Capped, speaker-split IndieFake subset (pack_indiefake manifest): genuine train/test, fakes train/test."""
     with tarfile.open(tp) as t:
@@ -324,6 +340,11 @@ def prep(raw, work, mailabs_tgz, workers, hindi_root=None):
                                      family=f"IndicSynth/{g}" if g else "genuine", source=corpus, speaker=spk,
                                      parent=uid, locator="")
                     yield uid, b
+            vzp = raw / "voxenes" / "voxenes-2026.zip"
+            if vzp.exists():
+                for r, b in iter_voxenes(vzp):
+                    meta[r["uid"]] = r
+                    yield r["uid"], b
             if itp.exists():
                 for r, b in iter_indiefake(itp):
                     spk = "indiefake/" + r["speaker"]
@@ -515,8 +536,9 @@ def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_eve
             b = base_family(r["family"])
             tgt = b in TARGETS or any(b in v for v in RELATED.values())
             hindi = r["family"].startswith(("hi__", "IndicSynth/"))
-            groups[("h" if hindi else ("t" if tgt else "d"), r["family"])].append(i)
-    kinds = {"g": 0.5, "t": 0.28, "d": 0.14, "h": 0.08}
+            vc = r["family"].startswith("VoxENES/vc/") or b == "RVC"
+            groups[("h" if hindi else ("v" if vc else ("t" if tgt else "d")), r["family"])].append(i)
+    kinds = {"g": 0.5, "t": 0.26, "d": 0.12, "h": 0.07, "v": 0.05}
     kinds = {k: v for k, v in kinds.items() if any(kk[0] == k for kk in groups)}
     keys = list(groups)
     probs = np.array([kinds[k[0]] / sum(1 for kk in keys if kk[0] == k[0]) for k in keys])
