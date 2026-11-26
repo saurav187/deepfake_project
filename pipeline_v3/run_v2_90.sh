@@ -18,6 +18,7 @@ case "${1:?phase}" in
     cp /content/drive/MyDrive/audio-v3/development/mailabs/en_US.tgz "$R/mailabs_en_US.tgz"
     log "prep"
     python3 -u -m pipeline_v3.v2_90 prep --raw "$R" --work "$W" --mailabs "$R/mailabs_en_US.tgz" \
+      --hindi /content/drive/MyDrive/audio-v3/development \
       --workers "$(($(nproc) - 1))" 2>&1 | tee "$D/run/prep.log"
     cp "$W/prep.json" "$D/run/prep.json"
     log "mirror shards"

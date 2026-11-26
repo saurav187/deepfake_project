@@ -175,3 +175,29 @@ the same train split with the same sampler and augmentation:
 
 The chosen option is frozen in `selection.json` before calibration. Calibration, sign-off and
 evaluation use it unchanged. C1 (frozen-feature head) is dropped.
+
+## Amendment 4 (26 Nov, ~20:35 IST, before any V2-90 data was preprocessed or scored)
+
+The owner states this is the final model and asks for the widest coverage. Additions:
+
+- **German ElevenLabs-v3** (MLAAD `fake/de`, all 1,000 clips). Training and development only;
+  stock-voice half B excluded, so the English test voices stay unseen.
+- **Hindi.** Reported as a **separate result**. It is not part of the primary English verdict.
+  - Fakes: MLAAD `fake/hi`, 9 systems, 300 clips each: IndicF5, Indri-TTS, OmniVoice, Ringg
+    Squirrel, Veena, VoxCPM2, Voxtral, Bark, XTTS-v2. Their M-AILABS text roles match English
+    (en_US train/development, en_UK test).
+  - Fakes: IndicSynth Hindi (XTTS-v2, VITS, FreeVC24 voice conversion; Drive copy). Target
+    speakers are Kathbath speakers, so the two share a namespace.
+  - Genuine: Kathbath Hindi (8 of 32 shards) and IndicVoices Hindi (5 shards; read, extempore,
+    conversation).
+  - Split by speaker: `sha256(spk)%10` in {0,1} test, 2 calibration (genuine), 3 development,
+    else train.
+  - Caps: 40 genuine clips per speaker in train, 10 in evaluation, 3,000 IndicSynth training
+    fakes.
+- **Cutoff.** Calibrated on **English** calibration genuine only, unchanged. Hindi genuine FA
+  and Hindi fake detection are reported at that same cutoff (`genuine_hindi` cell). The primary
+  `genuine` cell is English test genuine only (this replaces the all-sources pool of
+  amendment 2 only by removing Hindi; AMI and IndieFake stay in it).
+- **Known caveat.** An IndicSynth FreeVC fake converts a *source* speaker's utterance. The
+  source speaker's genuine audio may fall in another split. This is content overlap, not
+  identity overlap, and is noted.
