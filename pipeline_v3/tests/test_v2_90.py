@@ -8,6 +8,28 @@ import pytest
 from pipeline_v3 import v2_90 as v
 
 
+def test_ami_segment_ids_survive_reused_row_ids_and_keep_mic_siblings(tmp_path):
+    pa = pytest.importorskip("pyarrow")
+    pq = pytest.importorskip("pyarrow.parquet")
+    for mic in ("ihm", "sdm"):
+        path = tmp_path / "ami" / mic / "sample.parquet"
+        path.parent.mkdir(parents=True)
+        pq.write_table(pa.table({
+            "id": [34, 34],
+            "audio_id": ["segment-1", "segment-2"],
+            "meeting_id": ["meeting-1", "meeting-2"],
+            "speaker_id": ["FEO070", "FEO070"],
+            "begin_time": [0.0, 0.0],
+            "audio": [{"bytes": b"first"}, {"bytes": b"second"}],
+        }), path)
+
+    rows = list(v.iter_genuine(tmp_path))
+    assert len({row[0] for row in rows}) == 4
+    assert len({row[4] for row in rows}) == 2
+    assert len({row[5] for row in rows}) == 1
+    assert len({row[2] for row in rows}) == 1
+
+
 def _rows(fams, n, label=1, split="dev", source="mlaad"):
     out = []
     for f in fams:
