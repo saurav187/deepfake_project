@@ -36,6 +36,8 @@ DIVERSE = [
     "OmniVoice", "ZipVoice", "NeuTTS-Air", "PocketTTS", "Kitten-TTS-Nano-0.2", "RVC", "suno_bark",
     "Echo-TTS", "GLM-TTS", "LongCat-AudioDiT", "Hume TADA-3B-ML", "Dramabox",
 ]
+EXTRA_MLAAD = ["RVC"]  # voice conversion (training only, en_US rows)
+EXTRA_GENUINE = {"ami": ("edinburghcstr/ami", ["ihm/test-*", "ihm/train-0000[0-5]-*", "sdm/test-*"])}
 GENUINE = {
     "librittsr": ("mythicinfinity/libritts_r", ["data/dev.clean/*", "data/dev.other/*", "data/test.clean/*",
                                                  "data/test.other/*", "data/train.clean.100/*"]),
@@ -82,11 +84,11 @@ def main():
         tpath.unlink()
         print(f"{time.time() - t0:7.0f}s mlaad {folder}", flush=True)
 
-    for folder in (ON_DRIVE if only != "genuine" else []):
+    for folder in (ON_DRIVE if only not in ("genuine", "extra") else []):
         rel = f"mlaad/{folder}.tar"
         if rel not in done:
             pack(drive_mlaad / folder, folder, rel)
-    for folder in [f for f in TARGET_RELATED if f not in ON_DRIVE and only != "genuine"]:
+    for folder in [f for f in TARGET_RELATED if f not in ON_DRIVE and only not in ("genuine", "extra")]:
         rel = f"mlaad/{folder}.tar"
         if rel in done:
             continue
@@ -97,7 +99,8 @@ def main():
         shutil.rmtree(d / "fake/en" / folder)
     import csv as _csv
     import hashlib as _h
-    for folder in (DIVERSE[:DIVERSE_N] if only != "genuine" else []):
+    div = EXTRA_MLAAD if only == "extra" else (DIVERSE[:DIVERSE_N] if only != "genuine" else [])
+    for folder in div:
         rel = f"mlaad/{folder}.tar"
         if rel in done:
             continue
@@ -116,7 +119,8 @@ def main():
                 f.unlink()
         pack(src, folder, rel)
         shutil.rmtree(src)
-    for name, (repo, pats) in (GENUINE.items() if only != "mlaad" else []):
+    gen = EXTRA_GENUINE if only == "extra" else (GENUINE if only != "mlaad" else {})
+    for name, (repo, pats) in gen.items():
         d = scratch / name
         snapshot_download(repo, repo_type="dataset", local_dir=d, allow_patterns=pats, max_workers=16)
         for p in sorted(d.rglob("*.parquet")):

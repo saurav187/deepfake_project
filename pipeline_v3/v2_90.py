@@ -110,6 +110,9 @@ def genuine_split(corpus, spk, part):
         return "test" if part == "test" else "train"
     if corpus == "mailabs":
         return "train"
+    if corpus == "ami":  # by speaker across official folds, so no AMI speaker spans train and test
+        b = h("ami/" + spk) % 5
+        return "test" if b == 0 else ("cal" if b == 1 else "train")
     raise ValueError(corpus)
 
 
@@ -132,9 +135,11 @@ def iter_genuine(raw):
     """Yield (uid, corpus, split, speaker, raw bytes) for all genuine sources."""
     import pyarrow.parquet as pq
 
-    for corpus in ("librittsr", "vctk", "globe"):
+    for corpus in ("librittsr", "vctk", "globe", "ami"):
         for p in sorted((raw / corpus).rglob("*.parquet")):
             part = p.parent.name if corpus == "librittsr" else ("test" if p.name.startswith("test") else "train")
+            if corpus == "ami":
+                part = p.parent.name  # ihm (headset) / sdm (distant mic): recorded per row below
             pf = pq.ParquetFile(p)
             for rg in range(pf.num_row_groups):
                 t = pf.read_row_group(rg)
@@ -143,6 +148,8 @@ def iter_genuine(raw):
                 for i, (a, s) in enumerate(zip(t.column(ac).to_pylist(), t.column(sc).to_pylist())):
                     s = str(s)
                     uid = f"{corpus}/{s}/{ids[i] if ids else (a.get('path') or f'{p.stem}-{rg}-{i}')}"
+                    if corpus == "ami":
+                        uid = f"ami-{part}/{s}/{ids[i] if ids else i}"
                     yield uid, corpus, genuine_split(corpus, s, part), s, a["bytes"]
 
 
@@ -152,6 +159,16 @@ def iter_mailabs(tgz):
             if m.isfile() and m.name.endswith(".wav") and "/by_book/" in m.name:
                 spk = m.name.split("/by_book/")[1].split("/")[1]
                 yield f"mailabs/{m.name}", "mailabs", "train", spk, t.extractfile(m).read()
+
+
+def iter_indiefake(tp):
+    """Capped, speaker-split IndieFake subset (pack_indiefake manifest): genuine train/test, fakes train/test."""
+    with tarfile.open(tp) as t:
+        man = {m["member"]: m for m in json.loads(t.extractfile("indiefake/manifest.json").read())}
+        for m in t:
+            r = man.get(m.name)
+            if r:
+                yield r, t.extractfile(m).read()
 
 
 def _crop_job(args):
@@ -231,7 +248,28 @@ def prep(raw, work, mailabs_tgz, workers):
                     yield uid, b
 
         meta = {}
-        for uid, x, err in pool.imap_unordered(_crop_job, admit(), chunksize=8):
+        itp = raw / "indiefake" / "indiefake.tar"
+
+        def admit_all():
+            yield from admit()
+            if itp.exists():
+                for r, b in iter_indiefake(itp):
+                    spk = "indiefake/" + r["speaker"]
+                    split = r["split"]
+                    if split == "train" and h(spk) % 10 == 0:
+                        split = "dev"
+                    elif split == "train" and h(spk) % 10 == 1:
+                        split = "cal"  # calibration genuine only, capped like other eval speakers
+                        if r["label"] == 1 or per_spk[("indiefake", "cal", spk)] >= EVAL_CAP_SPK:
+                            continue
+                        per_spk[("indiefake", "cal", spk)] += 1
+                    uid = r["member"]
+                    meta[uid] = dict(uid=uid, split=split, label=r["label"],
+                                     family="IndieFake" if r["label"] else "genuine", source="indiefake",
+                                     speaker=spk, parent=uid, locator="")
+                    yield uid, b
+
+        for uid, x, err in pool.imap_unordered(_crop_job, admit_all(), chunksize=8):
             r = meta[uid]
             if x is None:
                 excl[f"{r['split']}|genuine/{r['source']}|{err or 'short'}"] += 1

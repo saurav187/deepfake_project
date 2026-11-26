@@ -133,3 +133,23 @@ speakers.
 Colab's ffmpeg lacks an AMR-NB encoder. The held-out unseen call codec is therefore
 **G.726 32 kbps (8 kHz)** instead of AMR-NB, both in training (excluded) and in evaluation.
 Evaluation channels: clean, G.711 µ-law 8 kHz, G.726 (unseen), Opus 12 kbps, GSM.
+
+## Amendment 2 (26 Nov, ~19:30 IST, before any V2-90 data was preprocessed or scored)
+
+At the owner's request (diversity of recordings and speakers), two genuine sources and one fake
+system are added.
+
+- **AMI meetings** (`edinburghcstr/ami`): headset (IHM) and distant-mic (SDM) segments,
+  spontaneous speech. Split by speaker: `sha256("ami/"+spk)%5 == 0` test, `== 1` calibration,
+  else train. Both mics of one speaker share a split.
+- **IndieFake** (local copy; capped subset packed by `pack_indiefake.py`, sha256 `256ee052…`):
+  Indian-accented English.
+  - 13 speakers are held out for test (genuine and fakes, 10 clips each).
+  - Of the rest, speakers with `sha256%10 == 1` give calibration genuine (fakes dropped) and
+    `== 0` give development; the remainder train.
+  - IndieFake fakes are a descriptive cell, not a target.
+- **MLAAD `RVC`** (voice conversion), en_US rows, training only.
+
+**Primary genuine FA** is now pooled over *all* test genuine sources: LibriTTS-R, VCTK, GLOBE,
+AMI and IndieFake. It is also reported per source, plus a "read speech only" pool (LibriTTS-R,
+VCTK, GLOBE). The calibration pool adds the AMI and IndieFake calibration speakers.
