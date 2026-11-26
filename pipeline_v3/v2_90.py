@@ -37,6 +37,17 @@ GEN_CAP_CORPUS, GEN_CAP_SPK, EVAL_CAP_SPK = 4000, 40, 10
 CHANNELS_EVAL = ["clean", "mulaw8k", "g726", "opus12", "gsm"]
 TRAIN_CODECS = ["mulaw8k", "alaw8k", "gsm", "opus8", "opus16", "opus24", "mp3"]  # G.726 held out (unseen codec)
 IST = timezone(timedelta(hours=5, minutes=30))
+HINDI_SOURCES = ("kathbath", "indicvoices")
+HINDI_CAP_FAKE = 3000
+
+
+def split_lang(folder):
+    """MLAAD tar stem: '<lang>__<system>' for non-English folders, plain '<system>' for English."""
+    return folder.split("__", 1) if "__" in folder else ("en", folder)
+
+
+def base_family(fam):
+    return split_lang(fam)[1]
 
 
 def h(s):
@@ -80,12 +91,19 @@ def mlaad_rows(raw):
         folder = tp.stem
         with tarfile.open(tp) as t:
             meta = t.extractfile(f"{folder}/meta.csv").read().decode()
+        lang, base = split_lang(folder)
         for r in csv.DictReader(io.StringIO(meta), delimiter="|"):
             region = r["original_file"].split("/")[0]
             voice = mlaad_voice(r)
             half = "A" if h(voice) % 2 == 0 else "B"
-            stock = folder.startswith(VOICE_SPLIT)
-            if region == "en_US":
+            stock = base.startswith(VOICE_SPLIT)
+            if lang == "de":  # other-language training data of a target family (never test)
+                if stock and half == "B":
+                    continue
+                split = "dev" if h(r["original_file"]) % 10 == 0 else "train"
+            elif lang == "hi":  # Hindi: same M-AILABS text roles as English (en_US train, en_UK test)
+                split = ("dev" if h(r["original_file"]) % 10 == 0 else "train") if region == "en_US" else "test"
+            elif region == "en_US":
                 if stock and half == "B":
                     continue
                 split = "dev" if h(r["original_file"]) % 10 == 0 else "train"
@@ -94,7 +112,7 @@ def mlaad_rows(raw):
                     continue
                 split = "test"
             out.append(dict(uid=f"mlaad/{folder}/{Path(r['path']).name}", split=split, label=1, family=folder,
-                            source="mlaad", speaker=f"{folder}:{voice}", parent=r["original_file"],
+                            source="mlaad", speaker=f"{base}:{voice}", parent=r["original_file"],
                             locator=f"{tp.name}::{folder}/{Path(r['path']).name}"))
     return out
 
@@ -161,6 +179,38 @@ def iter_mailabs(tgz):
                 yield f"mailabs/{m.name}", "mailabs", "train", spk, t.extractfile(m).read()
 
 
+def hindi_split(spk):
+    b = h(spk) % 10
+    return "test" if b in (0, 1) else ("cal" if b == 2 else ("dev" if b == 3 else "train"))
+
+
+def iter_hindi(root, kathbath_shards=8):
+    """Kathbath + IndicVoices genuine and IndicSynth fakes (Drive parquet). IndicSynth target speakers are
+    Kathbath speakers, so both share the 'hi-kb/' namespace and split by speaker together."""
+    import pyarrow.parquet as pq
+
+    srcs = [("kathbath", sorted((root / "kathbath/hindi").glob("*.parquet"))[:kathbath_shards]),
+            ("indicvoices", sorted((root / "indicvoices/hindi").glob("*.parquet"))),
+            ("indicsynth", sorted((root / "indicsynth/Hindi").glob("*.parquet")))]
+    for corpus, files in srcs:
+        for p in files:
+            pf = pq.ParquetFile(p)
+            for rg in range(pf.num_row_groups):
+                t = pf.read_row_group(rg)
+                ac = audio_col(t)
+                cols = t.column_names
+                if corpus == "indicsynth":
+                    spk = [f"hi-kb/{s}" for s in t.column("Target Speaker ID").to_pylist()]
+                    gen = t.column("Generative Model").to_pylist()
+                else:
+                    pre = "hi-kb/" if corpus == "kathbath" else "hi-iv/"
+                    spk = [pre + str(s) for s in t.column("speaker_id").to_pylist()]
+                    gen = [None] * len(spk)
+                for i, (a, s, g) in enumerate(zip(t.column(ac).to_pylist(), spk, gen)):
+                    uid = f"{corpus}/{p.stem}/{rg}/{i}"
+                    yield uid, corpus, hindi_split(s), s, g, a["bytes"]
+
+
 def iter_indiefake(tp):
     """Capped, speaker-split IndieFake subset (pack_indiefake manifest): genuine train/test, fakes train/test."""
     with tarfile.open(tp) as t:
@@ -201,7 +251,7 @@ class ShardWriter:
         self.buf, self.meta, self.n = [], [], self.n + 1
 
 
-def prep(raw, work, mailabs_tgz, workers):
+def prep(raw, work, mailabs_tgz, workers, hindi_root=None):
     from multiprocessing import Pool
 
     shards = work / "shards"
@@ -252,6 +302,24 @@ def prep(raw, work, mailabs_tgz, workers):
 
         def admit_all():
             yield from admit()
+            if hindi_root:
+                fake_n = Counter()
+                for uid, corpus, split, spk, g, b in iter_hindi(hindi_root):
+                    cap = GEN_CAP_SPK if split in ("train", "dev") else EVAL_CAP_SPK
+                    k = (corpus, split, spk)
+                    if per_spk[k] >= cap:
+                        continue
+                    if g is None and split in ("train", "dev") and per_corpus[(corpus, split)] >= GEN_CAP_CORPUS:
+                        continue
+                    if g is not None and (split == "cal" or (split in ("train", "dev") and fake_n[split] >= HINDI_CAP_FAKE)):
+                        continue
+                    per_spk[k] += 1
+                    per_corpus[(corpus, split)] += 1
+                    fake_n[split] += g is not None
+                    meta[uid] = dict(uid=uid, split=split, label=int(g is not None),
+                                     family=f"IndicSynth/{g}" if g else "genuine", source=corpus, speaker=spk,
+                                     parent=uid, locator="")
+                    yield uid, b
             if itp.exists():
                 for r, b in iter_indiefake(itp):
                     spk = "indiefake/" + r["speaker"]
@@ -313,8 +381,8 @@ def leakage(man):
     }
     # stock voices: compare voice names across folders of the same vendor
     def voices(split):
-        return {(r["family"].split("-")[0], r["speaker"].split(":", 1)[1]) for r in man
-                if r["split"] == split and r["label"] == 1 and r["family"].startswith(VOICE_SPLIT)}
+        return {(base_family(r["family"]).split("-")[0], r["speaker"].split(":", 1)[1]) for r in man
+                if r["split"] == split and r["label"] == 1 and base_family(r["family"]).startswith(VOICE_SPLIT)}
     chk["test_stock_voice_in_train"] = len(voices("test") & (voices("train") | voices("dev")))
     if any(chk.values()):
         raise ValueError(f"Split leakage: {chk}")
@@ -440,9 +508,12 @@ def train(work, drive, encoder, steps, batch, workers, lr_enc, lr_head, eval_eve
         if r["label"] == 0:
             groups[("g", r["source"])].append(i)
         else:
-            tgt = r["family"] in TARGETS or any(r["family"] in v for v in RELATED.values())
-            groups[("t" if tgt else "d", r["family"])].append(i)
-    kinds = {"g": 0.5, "t": 0.3, "d": 0.2}
+            b = base_family(r["family"])
+            tgt = b in TARGETS or any(b in v for v in RELATED.values())
+            hindi = r["family"].startswith(("hi__", "IndicSynth/"))
+            groups[("h" if hindi else ("t" if tgt else "d"), r["family"])].append(i)
+    kinds = {"g": 0.5, "t": 0.28, "d": 0.14, "h": 0.08}
+    kinds = {k: v for k, v in kinds.items() if any(kk[0] == k for kk in groups)}
     keys = list(groups)
     probs = np.array([kinds[k[0]] / sum(1 for kk in keys if kk[0] == k[0]) for k in keys])
     probs /= probs.sum()
@@ -650,7 +721,7 @@ class Scorer:
 
 def calibrate(work, encoder=None):
     st = Store(work, {"cal"})
-    gen = [r for r in st.rows if r["label"] == 0]
+    gen = [r for r in st.rows if r["label"] == 0 and r["source"] not in HINDI_SOURCES]  # English cutoff
     scorer = Scorer(work)
     sc = scorer(st, gen, "clean")
     c = cutoff_at(sc)
@@ -727,7 +798,8 @@ def evaluate(work, encoder=None):
                 f.write(json.dumps({"uid": r["uid"], "channel": ch, "score": v}) + "\n")
             cells = defaultdict(lambda: defaultdict(list))
             for r, v in zip(rows, sc):
-                cells[r["family"] if r["label"] else "genuine"][r["speaker"]].append(int(v >= c))
+                hindi_gen = not r["label"] and r["source"] in HINDI_SOURCES
+                cells[r["family"] if r["label"] else ("genuine_hindi" if hindi_gen else "genuine")][r["speaker"]].append(int(v >= c))
                 if not r["label"]:
                     cells["genuine/" + r["source"]][r["speaker"]].append(int(v >= c))
                     if r["source"] in ("librittsr", "vctk", "globe"):
@@ -768,6 +840,7 @@ def main():
     p.add_argument("--work", type=Path, required=True)
     p.add_argument("--drive", type=Path)
     p.add_argument("--mailabs", type=Path)
+    p.add_argument("--hindi", type=Path, help="Drive development/ root holding kathbath, indicvoices, indicsynth")
     p.add_argument("--encoder", default="facebook/wav2vec2-xls-r-300m")
     p.add_argument("--steps", type=int, default=6000)
     p.add_argument("--batch", type=int, default=32)
@@ -780,7 +853,7 @@ def main():
     a = p.parse_args()
     a.work.mkdir(parents=True, exist_ok=True)
     if a.phase == "prep":
-        r = prep(a.raw, a.work, a.mailabs, a.workers)
+        r = prep(a.raw, a.work, a.mailabs, a.workers, a.hindi)
     elif a.phase == "audit":
         r = audit(a.work)
     elif a.phase == "train":

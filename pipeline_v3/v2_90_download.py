@@ -36,6 +36,8 @@ DIVERSE = [
     "OmniVoice", "ZipVoice", "NeuTTS-Air", "PocketTTS", "Kitten-TTS-Nano-0.2", "RVC", "suno_bark",
     "Echo-TTS", "GLM-TTS", "LongCat-AudioDiT", "Hume TADA-3B-ML", "Dramabox",
 ]
+HINDI_MLAAD = ["IndicF5", "Indri-TTS-0.1", "OmniVoice", "Ringg Squirrel TTS v1.0", "Veena", "VoxCPM2", "Voxtral",
+               "tts_models_multilingual_multi-dataset_bark", "tts_models_multilingual_multi-dataset_xtts_v2"]
 EXTRA_MLAAD = ["RVC"]  # voice conversion (training only, en_US rows)
 EXTRA_GENUINE = {"ami": ("edinburghcstr/ami", ["ihm/test-*", "ihm/train-0000[0-5]-*", "sdm/test-*"])}
 GENUINE = {
@@ -102,7 +104,7 @@ def main():
     import csv as _csv
     import hashlib as _h
     half = DIVERSE_N // 2
-    div = {"extra": EXTRA_MLAAD, "divA": DIVERSE[:half], "divB": DIVERSE[half:DIVERSE_N], "genuine": [],
+    div = {"more": [], "extra": EXTRA_MLAAD, "divA": DIVERSE[:half], "divB": DIVERSE[half:DIVERSE_N], "genuine": [],
            "rel": []}.get(only, DIVERSE[:DIVERSE_N])
     for folder in div:
         rel = f"mlaad/{folder}.tar"
@@ -123,6 +125,28 @@ def main():
                 f.unlink()
         pack(src, folder, rel)
         shutil.rmtree(src)
+    if only == "more":  # final-model coverage: Hindi MLAAD (9 systems, 300 each) + German ElevenLabs-v3 (all)
+        import csv as _csv2
+        import hashlib as _h2
+        for lang, folder, n in [("de", "ElevenLabs-v3", 1000)] + [("hi", f, 300) for f in HINDI_MLAAD]:
+            stem = f"{lang}__{folder}"
+            rel = f"mlaad/{stem}.tar"
+            if rel in done:
+                continue
+            d = scratch / "mlaad"
+            m = hf_hub_download("mueller91/MLAAD", f"fake/{lang}/{folder}/meta.csv", repo_type="dataset",
+                                revision=MLAAD_REV, local_dir=d)
+            rows = sorted(_csv2.DictReader(open(m), delimiter="|"), key=lambda r: _h2.sha256(r["path"].encode()).hexdigest())
+            names = [r["path"].split("/")[-1] for r in rows[:n]]
+            snapshot_download("mueller91/MLAAD", repo_type="dataset", revision=MLAAD_REV, local_dir=d,
+                              allow_patterns=[f"fake/{lang}/{folder}/{x}" for x in names], max_workers=8)
+            src = d / "fake" / lang / folder
+            keep = set(names) | {"meta.csv"}
+            for f in src.iterdir():
+                if f.name not in keep:
+                    f.unlink()
+            pack(src, stem, rel)
+            shutil.rmtree(src)
     gen = EXTRA_GENUINE if only == "extra" else (GENUINE if only in ("genuine", "all") else {})
     for name, (repo, pats) in gen.items():
         d = scratch / name
