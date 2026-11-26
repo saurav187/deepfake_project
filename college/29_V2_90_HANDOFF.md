@@ -15,7 +15,7 @@ _Updated as the run progresses; every number below is from real data unless mark
 | Local smoke (synthetic audio, RTX 5060) | prep → publish → preflight refuses tiny set → train interrupted at step 2 → resumed at 2 → resume with different LR refused |
 | Prep on real data (L4) | restarted at 22:16 IST on `6c3c4c9`, published at 22:52, coverage passed and audit completed at 22:54 |
 | GPU smoke on real data | corrected C3 run passed at 23:09:50 IST, resumed at step 20 and scored dev through step 60 |
-| Full training | C2 launched on the L4 at 23:53 IST. A replacement A100 was requested for C3 after the original assignment ended |
+| Full training | C2 started at 23:53 IST on L4. C3 started at 00:08 IST on the replacement A100 |
 | Held-out test | sealed (no sign-off yet) |
 
 At takeover, the L4 prep on `15d384a` raised `KeyError: 'ami-ihm/FEO070/34'` before publishing a prepared set. Commit `6c3c4c9` uses AMI audio IDs and guards against repeated IDs. It is deployed on both GPUs. The local regression in `4c92800` validates reused row IDs and shared microphone parents. The idle download CPU was released. The A100 smoke queue logs to `/content/codex-v290-smoke.log`.
@@ -34,6 +34,8 @@ The original smoke run loaded the published C3 Fairseq checkpoint directly into 
 The corrected `smoke3fixed` loaded all 806 encoder tensors, checkpointed at step 20, resumed at step 20, and completed development scoring at steps 40 and 60 without an OOM. Each check scored all four target families. The Drive log is `run/train-smoke3fixed.log`. The resulting development values are smoke evidence. No held-out audio was scored.
 
 After the workstation outage, the L4 still had the verified prepared set and deployed `a4a7068`. Colab pruned the earlier A100 assignment. C2 started with the planned batch of 32 and a 6,000-step schedule. Compute balance at recovery was 129.26 CU.
+
+Colab returned Service Unavailable for the initial A100 allocation attempts. A single retry loop secured the replacement A100-SXM4-40GB at 00:02:59 IST and exited. The owner mounted Drive. The replacement used the verified `a4a7068` bundle and matching prepared fingerprint. C3 started with batch 16 and a 4,500-step schedule, chosen before launch to allow time for evaluation after the outage. Its first 100 training steps took 36 s, excluding model loading and development scoring. C2 had a durable step-500 checkpoint and reached step 950 during the recovery.
 
 ## Review findings → fixes
 
