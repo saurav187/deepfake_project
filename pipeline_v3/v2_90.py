@@ -38,6 +38,7 @@ CHANNELS_EVAL = ["clean", "mulaw8k", "g726", "opus12", "gsm"]
 TRAIN_CODECS = ["mulaw8k", "alaw8k", "gsm", "opus8", "opus16", "opus24", "mp3"]  # G.726 held out (unseen codec)
 IST = timezone(timedelta(hours=5, minutes=30))
 HINDI_SOURCES = ("kathbath", "indicvoices")
+SHIPPED_RELEASE_CUTOFF = 0.5623497986447662  # detector/runs/release/v1/release.json likely_fake_at_or_above
 # Documented minimum coverage (protocol 28 amendment 6). Fakes: eligible recordings per target family;
 # genuine: (recordings, speakers) per split. Below these, training/selection is refused or a cell is insufficient.
 MIN_FAKE = {"train": 200, "dev": 25, "test": 100}
@@ -982,22 +983,66 @@ def calibrate(work, encoder=None):
     return rep
 
 
+TEST_FIELDS = ("uid", "split", "label", "family", "source", "speaker", "parent", "group", "shard", "idx")
+
+
+def test_binding(work):
+    """Hash every field that decides which audio is scored, plus the bytes of each referenced shard."""
+    rows = sorted(load_manifest(work, {"test"}), key=lambda r: r["uid"])
+    if len({r["uid"] for r in rows}) != len(rows) or len({(r["shard"], r["idx"]) for r in rows}) != len(rows):
+        raise ValueError("duplicate test recording or audio reference")
+    sh = work / PREPARED / "shards"
+    shards = {name: fsha(sh / name) for name in sorted({r["shard"] for r in rows})}
+    blob = "\n".join(json.dumps({k: r.get(k) for k in TEST_FIELDS}, sort_keys=True) for r in rows)
+    blob += "\n" + json.dumps(shards, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest(), rows, shards
+
+
+def atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def signoff(work, protocol, commit):
+    """Write-once: binds prepared data, selected weights, preprocessing code, fixed cutoff and the test set."""
     p = work / "signoff.json"
     if p.exists():
         raise SystemExit("signoff exists (write-once)")
-    if (work / "eval-scores.jsonl").exists():
+    if (work / "eval-scores.jsonl").exists() or (work / "result.json").exists():
         raise ValueError("test already scored")
-    test = sorted(load_manifest(work, {"test"}), key=lambda r: r["uid"])
-    tm = hashlib.sha256("\n".join(f"{r['uid']}|{r['label']}|{r['family']}|{r['speaker']}" for r in test).encode()).hexdigest()
+    fp = verify_prepared(work)
+    sel = json.loads((work / "selection.json").read_text())
+    for m in sel["members"]:
+        if fsha(work / f"ckpt-{m['tag']}/best.pt") != m["sha256"]:
+            raise ValueError(f"weights of {m['tag']} changed after selection")
     cut = json.loads((work / "cutoff.json").read_text())
     if cut["model_sha256"] != fsha(work / "selection.json"):
         raise ValueError("model changed after calibration")
+    tb, rows, shards = test_binding(work)
     rec = {"signed": now(), "protocol_sha256": fsha(protocol), "code_commit": commit, "code_sha256": fsha(__file__),
-           "model_sha256": cut["model_sha256"], "cutoff": cut["cutoff"], "test_manifest_sha256": tm,
-           "test_rows": dict(Counter(r["family"] if r["label"] else "genuine/" + r["source"] for r in test))}
-    p.write_text(json.dumps(rec, indent=1))
+           "dataset_fingerprint": fp, "selection_sha256": fsha(work / "selection.json"),
+           "member_weights_sha256": {m["tag"]: m["sha256"] for m in sel["members"]},
+           "model_sha256": cut["model_sha256"], "cutoff": cut["cutoff"], "cutoff_sha256": fsha(work / "cutoff.json"),
+           "test_binding_sha256": tb, "test_shards_sha256": shards,
+           "test_rows": dict(Counter(r["family"] if r["label"] else "genuine/" + r["source"] for r in rows))}
+    atomic_write(p, json.dumps(rec, indent=1))
     return rec
+
+
+def check_signoff(work):
+    s = json.loads((work / "signoff.json").read_text())
+    if verify_prepared(work) != s["dataset_fingerprint"]:
+        raise ValueError("prepared data changed after signoff")
+    if fsha(work / "selection.json") != s["selection_sha256"] or fsha(work / "cutoff.json") != s["cutoff_sha256"]:
+        raise ValueError("selection or cutoff changed after signoff")
+    for tag, h_ in s["member_weights_sha256"].items():
+        if fsha(work / f"ckpt-{tag}/best.pt") != h_:
+            raise ValueError(f"weights of {tag} changed after signoff")
+    tb, rows, _ = test_binding(work)
+    if tb != s["test_binding_sha256"]:
+        raise ValueError("test rows or their audio changed after signoff")
+    return s, rows
 
 
 def wilson(k, n, z=1.959964):
@@ -1026,23 +1071,27 @@ def boot(cl, B=2000, seed=20261126):
     return [round(v[int(0.025 * B)], 4), round(v[int(0.975 * B) - 1], 4)]
 
 
-def evaluate(work, encoder=None):
-    s = json.loads((work / "signoff.json").read_text())
-    if fsha(work / "selection.json") != s["model_sha256"]:
-        raise ValueError("model changed after signoff")
+def evaluate(work, encoder=None, scorer=None, channels=None):
+    """One pass on the signed-off test set. A completed evaluation bound to the same signoff is preserved and
+    returned unchanged on retry; outputs are published atomically."""
+    sig = fsha(work / "signoff.json")
+    if (work / "result.json").exists():
+        prev = json.loads((work / "result.json").read_text())
+        if prev.get("signoff_sha256") == sig:
+            print("evaluation already complete for this signoff; preserved", flush=True)
+            return prev
+        raise ValueError("result.json exists for a different signoff; refusing to overwrite")
+    s, rows = check_signoff(work)
     st = Store(work, {"test"})
-    rows = sorted(st.rows, key=lambda r: r["uid"])
-    tm = hashlib.sha256("\n".join(f"{r['uid']}|{r['label']}|{r['family']}|{r['speaker']}" for r in rows).encode()).hexdigest()
-    if tm != s["test_manifest_sha256"]:
-        raise ValueError("test manifest changed after signoff")
-    scorer = Scorer(work)
+    scorer = scorer or Scorer(work)
     c = s["cutoff"]
-    res = {"signoff_sha256": fsha(work / "signoff.json"), "evaluated": now(), "cutoff": c, "channels": {}}
-    with (work / "eval-scores.jsonl").open("w") as f:
-        for ch in CHANNELS_EVAL:
+    res = {"signoff_sha256": sig, "evaluated": now(), "cutoff": c, "channels": {}}
+    lines = []
+    for ch in (channels or CHANNELS_EVAL):
+        if True:
             sc = scorer(st, rows, ch)
             for r, v in zip(rows, sc):
-                f.write(json.dumps({"uid": r["uid"], "channel": ch, "score": v}) + "\n")
+                lines.append(json.dumps({"uid": r["uid"], "channel": ch, "score": v}))
             cells = defaultdict(lambda: defaultdict(list))
             for r, v in zip(rows, sc):
                 hindi_gen = not r["label"] and r["source"] in HINDI_SOURCES
@@ -1056,7 +1105,10 @@ def evaluate(work, encoder=None):
                 flat = [x for v in cl.values() for x in v]
                 t[k] = {"flagged": sum(flat), "n": len(flat), "rate": round(sum(flat) / len(flat), 4),
                         "wilson95": wilson(sum(flat), len(flat)), "clusters": len(cl), "cluster_boot95": boot(cl)}
-            g = t["genuine"]
+            g = t.get("genuine", {"flagged": 0, "n": 0, "wilson95": [0, 1], "cluster_boot95": None, "clusters": 0})
+            small = [f for f in TARGETS if f in t and t[f]["n"] < MIN_FAKE["test"]]
+            if g["n"] < MIN_GEN["test"][0] or g["clusters"] < MIN_GEN["test"][1]:
+                small.append("genuine")
             gaps = {}
             if g["flagged"] > math.floor(0.15 * g["n"]):
                 gaps["genuine_FA"] = g["flagged"] - math.floor(0.15 * g["n"])
@@ -1069,18 +1121,51 @@ def evaluate(work, encoder=None):
                     gaps[fam] = need - t[fam]["flagged"]
             lo_ok = all((t[f]["cluster_boot95"] or t[f]["wilson95"])[0] >= 0.90 for f in TARGETS if f in t) and \
                 (g["cluster_boot95"] or g["wilson95"])[1] <= 0.15
-            verdict = "INSUFFICIENT: untested " + ",".join(untested) if untested else (
-                "MISS" if gaps else ("PASS" if lo_ok else "PASS at point estimate; not robust"))
+            if untested or small:
+                verdict = "INSUFFICIENT: " + ", ".join([f"untested {f}" for f in untested] + [f"undersized {f}" for f in small])
+            else:
+                verdict = "MISS" if gaps else ("PASS" if lo_ok else "PASS at point estimate; not robust")
             res["channels"][ch] = {"cells": t, "gaps_in_recordings": gaps, "verdict": verdict}
             print(ch, verdict, {k: f"{v['flagged']}/{v['n']}" for k, v in t.items()}, flush=True)
-    (work / "result.json").write_text(json.dumps(res, indent=1))
+    audit = work / "audit.json"
+    res["shortcut_audit"] = json.loads(audit.read_text()).get("red_flags_gt_0.80") if audit.exists() else "not run"
+    atomic_write(work / "eval-scores.jsonl", "\n".join(lines) + "\n")
+    atomic_write(work / "result.json", json.dumps(res, indent=1))
     return res
+
+
+def baseline(work):
+    """Release v1 on the same eligible test recordings: shipped cutoff and the same independent calibration
+    rule (lowest cutoff with <= floor(0.15 n) English calibration genuine flagged). Run after signoff."""
+    from detector.inference import Detector
+
+    s, rows = check_signoff(work)
+    det = Detector()
+    st_t, st_c = Store(work, {"test"}), Store(work, {"cal"})
+    cal = [r for r in st_c.rows if r["label"] == 0 and r["source"] not in HINDI_SOURCES]
+    p = lambda st, r: float(det.analyze_wave(st.x(r).astype(np.float32))["fake_probability"])
+    pc = [p(st_c, r) for r in cal]
+    cut_cal = cutoff_at(pc)
+    pt = [p(st_t, r) for r in rows]
+    out = {"made": now(), "signoff_sha256": fsha(work / "signoff.json"), "release_sha256": det.release_sha256,
+           "view": "same treated 4 s crop as the candidate", "cutoffs": {}}
+    for name, c in (("shipped", SHIPPED_RELEASE_CUTOFF), ("calibrated", cut_cal)):
+        cells = defaultdict(lambda: [0, 0])
+        for r, v in zip(rows, pt):
+            k = r["family"] if r["label"] else ("genuine_hindi" if r["source"] in HINDI_SOURCES else "genuine")
+            for kk in [k] + ([f"genuine/{r['source']}"] if not r["label"] else []):
+                cells[kk][0] += int(v >= c)
+                cells[kk][1] += 1
+        out["cutoffs"][name] = {"cutoff": c, "cells": {k: {"flagged": a, "n": b, "rate": round(a / b, 4)}
+                                                      for k, (a, b) in sorted(cells.items())}}
+    atomic_write(work / "baseline.json", json.dumps(out, indent=1))
+    return out
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("phase", choices=["prep", "verify", "preflight", "audit", "train", "select", "calibrate",
-                                      "signoff", "evaluate"])
+                                      "signoff", "evaluate", "baseline"])
     p.add_argument("--include-voxenes", action="store_true", help="off for the primary run (no speaker lineage)")
     p.add_argument("--stop-after", type=int, help="smoke test: stop after this step to test resume")
     p.add_argument("--skip-preflight", action="store_true", help="smoke test on a tiny dataset only")
@@ -1121,6 +1206,8 @@ def main():
         r = calibrate(a.work, a.encoder)
     elif a.phase == "signoff":
         r = signoff(a.work, a.protocol, a.commit)
+    elif a.phase == "baseline":
+        r = baseline(a.work)
     else:
         r = evaluate(a.work, a.encoder)
     print(json.dumps(r, indent=1, default=str)[:6000])
