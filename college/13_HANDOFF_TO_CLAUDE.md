@@ -1,5 +1,16 @@
 # Pipeline v3 handoff for Claude
 
+## V2-90 on app_testing_dataset (27 Nov 2026, 21:4x–22:00 IST, Claude)
+
+- **Owner labels:** every file is fake except `real`.
+- **Model:** frozen V2-90 C4 (c2+c3 z-mean, checkpoint sha256s verified against selection.json), cutoff 0.88297, same 4 s crop as the held-out test. Scored on T4 `v290-test` (released), with the scorer in the scratchpad (`score_v290_files.py`).
+- **Results:**
+  - **Fakes detected: 37/37 scorable (100%).** C2 alone 37/37; C3 alone 36/37 (missed gemini11).
+  - 6 fakes were too short (<4 s after trim): gemini1, gemini2, sv2, mk(8), mk(9). Counted as missed, that's 37/43 = 86%.
+  - The `real` file was correctly judged real (C4 −0.02). Genuine false alarms 0/1, too few to measure.
+  - V1 on the same files: 2/38 at its frozen cutoff.
+- **Output:** `~/deepfake_eval/apptest_v290.csv`. Balance 95.23 CU.
+
 ## STOPPED for the night, 26 Nov 2026, 02:07 IST (owner instruction)
 
 - **Sessions:** all Colab sessions were released (v3-t4p, intake-cpu). Balance 148.06 CU, usage 0 CU/h.
