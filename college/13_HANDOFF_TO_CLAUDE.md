@@ -23,6 +23,107 @@
     - On the MLAAD dev panel: Chatterbox 144/166, EL 141/181, Fish 171/173, Gemini 150/181 at 107/697 false alarms. That's development evidence, not independent.
 - **Pending:** the independent-panel-1 evaluation (session 435e59bf), which needs pairs.jsonl on Drive and a T4 window. V2-L is still paused at its verified cache checkpoint, 1,040 clips.
 
+## Day-target-1 (24-hour English detection, `23_ONE_DAY_DETECTION_HANDOFF.md`): log
+
+- **25 Nov 2026, 23:33 IST: acknowledged** by Claude. Owner of the run through 26 Nov 23:20 IST. Code `3906c8b` (89 local tests pass).
+- **Session:** existing T4 `v3-t4p` (1.24 CU/h), Drive mounted, GPU idle at start (0 MiB), no pipeline process running. Another `colab ssh` client holds the runtime's single SSH slot, so this run drives the VM via `colab exec` only and does not touch other directories. The A100 and V2-L stay as they are; V2-L checkpoint, V1 pack, pilot and thresholds are read-only for this run.
+- **Writer (corrected 23:40 IST):** the interactive Claude session "Project progress analysis" had already launched the chain on `v3-t4p` at 23:33:41 IST (`/content/day_run.sh`, code `3906c8b` in `/content/day-src`, chain log `/content/day_run.log`, phase logs tee'd to `v2/day-target-1/<phase>.log`). Agreed by message: it is the **sole writer** of `v2/day-target-1` and the chain; this job observes read-only through `colab exec` and owns this section; neither releases `v3-t4p` without telling the other. Its VCC 2018 fix is held until evaluate finishes. No second chain was started (this job's unused source upload was removed). Balance at start 151.43 CU.
+- **Baseline** (exit 0, 23:33:41–23:33:43 IST, CPU): V1 teacher at its frozen upper threshold 0.907 on the previously inspected MLAAD panel (3 genuine M-AILABS readers). Target **not met**.
+
+  | Channel | Genuine FA | Chatterbox | ElevenLabs-v3 | FishTTS | Gemini-3.1-Flash |
+  |---|---|---|---|---|---|
+  | clean | 3/697 (0.43%) | 1/166 (0.6%) | 29/181 (16.0%) | 3/173 (1.7%) | 34/181 (18.8%) |
+  | opus (sim.) | 8/697 (1.15%) | 1/166 (0.6%) | 31/181 (17.1%) | 1/173 (0.6%) | 28/181 (15.5%) |
+  | phone (sim.) | 4/697 (0.57%) | 4/166 (2.4%) | 32/181 (17.7%) | 1/173 (0.6%) | 60/181 (33.1%) |
+- **Fit** started 23:33:43 IST.
+  - Fit is limited by Drive I/O. It reads the 5,000 cached WavLM `.npz` files one at a time, at 1.4% CPU and 0% GPU. Its log stayed empty because tee had not yet flushed to Drive.
+  - At 23:50 IST the writer started a **read-only** cache warm (`xargs -P16 cat > /dev/null` over those files, log `/content/warm.log`). It writes nothing.
+  - 23:44 IST: one observer poll failed on a local network error. No effect on the run.
+- **Pilot replay passed** (about 23:50 IST): fit got past the EER reproduction check against `pilot.json` and loaded WavLM for the calibrate and threshold cutoffs.
+- **23:55 IST, parallel job:** "modern-data intake" (`college/24_MODERN_DATA_INTAKE.md` @`95daceb`) is the sole writer of `development/modern-intake/`. It runs on its own CPU session `intake-cpu` and does not touch `v3-t4p`, `day-target-1`, the clip cache, V1 or V2-L. It has been asked to keep Drive I/O moderate until evaluate ends. Before any broader-data manifest enters this run it needs a separate audit, verified labels, overlap checks against the V1 held-out readers and the MLAAD panel readers, A08 excluded, no sealed data, and per-reader counts, plus explicit agreement.
+- **Candidate freeze, 00:02:44 IST** (fit exit 0, 29 min).
+  - **Record:** `frozen.json` sha256 `7fd02ac1…7b29`, frozen before any outside scoring.
+  - **Primary:** **`clean_opus`**, the head fitted on the original and Opus views of the same 2,000 pilot training clips. Its cutoff is **−4.333** decision logit, the max over clean, Opus and phone of the 2% cutoff on threshold-fold genuine audio.
+  - **Original pilot head `clean`:** cutoff −3.942.
+  - **Pilot replay:** n=375, AUC 1.000, EER 0.000. This is the unseen-domain (Chatterbox) select slice, reproduced against `pilot.json`.
+  - **Select at the calibrate cutoffs:** both heads catch 100% of select XTTS and Chatterbox in the clean and Opus views. Genuine false alarms are above the 2% budget for both: `clean` 4.0%, `clean_opus` 3.6%. `clean_opus` won on the false-alarm criterion.
+  - **Caveat:** a perfect select score is consistent with the known PhonemeDF shortcut (band-limited, darker fakes; failed audit `exploratory-failed-audit-v1`). Outside MLAAD scoring is the real test.
+- **Evaluate:** exit 0, 00:02:44–00:29:48 IST (27 min). All 1,398 recordings scored, CHAIN_DONE. `result.json` sha256 `7b3bee4f…69ad`. Bound to frozen `7fd02ac1…`, teacher scores `240f22bf…`, teacher freeze `43ff0c1c…`.
+
+  **Primary result: target NOT met.** No generator reaches 80% on any channel. This is a development panel of 3 genuine M-AILABS readers, and every cell has those 3 readers. Opus and phone are simulated channels.
+
+  Detection is flagged/clips. Genuine FA is the false-alarm rate.
+
+  | Model (cutoff) | Channel | Genuine FA | Chatterbox | ElevenLabs-v3 | FishTTS | Gemini-3.1-Flash |
+  |---|---|---|---|---|---|---|
+  | **clean_opus, primary (−4.333)** | **clean** | **13/697 (1.9%)** | **10/166 (6.0%)** | **40/181 (22.1%)** | **15/173 (8.7%)** | **8/181 (4.4%)** |
+  | | opus | 16/697 (2.3%) | 10/166 (6.0%) | 42/181 (23.2%) | 17/173 (9.8%) | 5/181 (2.8%) |
+  | | phone | 15/697 (2.2%) | 9/166 (5.4%) | 39/181 (21.5%) | 17/173 (9.8%) | 3/181 (1.7%) |
+  | clean, original pilot (−3.942) | clean | 11/697 (1.6%) | 9/166 (5.4%) | 41/181 (22.7%) | 9/173 (5.2%) | 10/181 (5.5%) |
+  | | opus | 14/697 (2.0%) | 9/166 (5.4%) | 42/181 (23.2%) | 12/173 (6.9%) | 7/181 (3.9%) |
+  | | phone | 15/697 (2.2%) | 8/166 (4.8%) | 37/181 (20.4%) | 11/173 (6.4%) | 6/181 (3.3%) |
+  | teacher V1 (0.907) | clean | 3/697 (0.4%) | 1/166 (0.6%) | 29/181 (16.0%) | 3/173 (1.7%) | 34/181 (18.8%) |
+  | | opus | 8/697 (1.1%) | 1/166 (0.6%) | 31/181 (17.1%) | 1/173 (0.6%) | 28/181 (15.5%) |
+  | | phone | 4/697 (0.6%) | 4/166 (2.4%) | 32/181 (17.7%) | 1/173 (0.6%) | 60/181 (33.1%) |
+
+  - **Clean-only:** the target is also missed for all four generators. The best clean cell is ElevenLabs-v3 at 22.1%.
+  - **False alarms:** the primary's genuine FA on outside data is 1.9% clean but **exceeds 2%** on simulated Opus (2.3%) and phone (2.2%). So even its realised operating point misses the strict budget on two channels.
+  - **Compared with teacher V1:** the primary catches more Chatterbox and Fish, catches about as many ElevenLabs, and catches far fewer Gemini. It also raises false alarms roughly 4×.
+  - **Reading:** the frozen-feature heads separate PhonemeDF XTTS/Chatterbox perfectly (select AUC 1.0) but do not transfer to the MLAAD generators. This is consistent with the known PhonemeDF bandwidth shortcut.
+- **Fallback result:** frozen released three-head detector v1. Exit 0, 00:30:45–01:27:40 IST (57 min), sole writer of `v2/day-target-1/fallback-detector-v1/`.
+  - **Records:** `result.json` sha256 `446ec99a…df34`, `inputs.json` `ebec2ef2…a13c`.
+  - **Integrity checks passed before scoring:**
+    - XLS-R files on Drive `models/xlsr` match the local training copy (config `0bffa0d0…`, preprocessor `a2254a5b…`, weights `d5e49057…`).
+    - `release.json` = `bdb7748c…`. Heads s42/s43/s44 = `e0ade0e6…` / `97c6ce44…` / `a2b2ed57…`.
+    - The provenance file is bound to the release's audit manifest `6680a620…`.
+  - **Overlap:**
+    - Exact decoded-PCM matches against the release's 138,180 train and dev hashes: **0 recordings**.
+    - Recordings with under 1 s of speech: **0**.
+    - Coverage is identical to day-target-1: 1,398 recordings × 3 channels = 4,194 (id, channel) trials.
+  - **Cutoff:** release v1, likely_fake at p ≥ 0.5623. It was frozen at a 5% false-alarm and 5% miss dev budget, not refitted to 2%.
+
+  **Paired view (same 4 s crop + norm + channel as the candidates): strict target NOT met.**
+
+  | Channel | Genuine FA | Chatterbox | ElevenLabs-v3 | FishTTS | Gemini-3.1-Flash |
+  |---|---|---|---|---|---|
+  | **clean** | **1/697 (0.1%)** | **67/166 (40.4%)** | **11/181 (6.1%)** | **155/173 (89.6%)** ✔ | **13/181 (7.2%)** |
+  | opus (sim.) | 7/697 (1.0%) | 64/166 (38.6%) | 18/181 (9.9%) | 156/173 (90.2%) ✔ | 14/181 (7.7%) |
+  | phone (sim.) | 7/697 (1.0%) | 67/166 (40.4%) | 21/181 (11.6%) | 156/173 (90.2%) ✔ | 20/181 (11.0%) |
+
+  **Full-recording view (the detector's own use; descriptive):**
+  - **Genuine FA:** 0/697 on all three channels.
+  - **Chatterbox:** 36.7–40.4%.
+  - **ElevenLabs-v3:** 4.4–9.4%.
+  - **FishTTS:** 97.7–98.8%.
+  - **Gemini:** 2.2–3.9%.
+
+  - **Reading:** release v1 is the best of the four models on this panel. It is the only one that meets the target for any generator: FishTTS, in all three channels. It also keeps false alarms at or below 1.0%. Chatterbox reaches about 40%. ElevenLabs-v3 and Gemini-3.1-Flash remain largely undetected, at 6–12%, by every model tested.
+  - **Caveats:**
+    - The panel has 3 genuine readers, and reader overlap with ASVspoof 5 cannot be verified.
+    - This panel was inspected before this run.
+    - Independent confirmation is unmeasured.
+    - Real calls are unmeasured.
+- **Independent recount (01:35 IST):** both the primary and fallback tables were recomputed straight from the per-recording score files and `teacher-eval-clips.csv` labels, outside `day_target.table`. All 15 cells in each table reproduce exactly (4,194 trials, 1,398 recordings).
+- **Time and CU:**
+  - **Elapsed:** chain 23:33:41–00:29:48 IST (56 min: baseline 2 s, fit 29 min, evaluate 27 min). Fallback 00:30:45–01:27:40 IST (57 min).
+  - **Balance:** 151.43 CU (23:32 IST) → 148.83 CU (01:28 IST), so 2.60 CU for the account. That includes the separate `intake-cpu` session from about 23:55 IST.
+  - **This run's T4 share:** about 1.24 CU/h × 1.9 h ≈ 2.4 CU.
+- **Failed attempts:** none in the chain or the fallback. One observer poll failed on a local network error (23:44 IST).
+- **Checkpoints:**
+  - `v2/day-target-1/`: `protocol.json`, `frozen.json` `7fd02ac1…`, `comparison-inputs.json`, `scores/` (1,398), `result.json` `7b3bee4f…`, phase logs.
+  - `fallback-detector-v1/`: `inputs.json` `ebec2ef2…`, `scores/` (1,398), `result.json` `446ec99a…`, `fallback.log`.
+  - V1 pack, pilot and thresholds and the V2-L checkpoint are untouched.
+- **Session:** `v3-t4p` is still up and owned by "Project progress analysis", which is integrating the result under `college/25_CODEX_ONE_DAY_CONTINUATION.md`.
+- **Remaining blockers:**
+  - Independent panel and real calls: unmeasured.
+  - Bounded training comparison: no separately audited broader training subset is ready yet. The modern-data intake has staged nothing for training.
+  - ElevenLabs-v3 and Gemini-3.1-Flash need training data from modern generators. Lowering the cutoff on this panel was not tested, because that would select the operating point on the evaluation recordings.
+- **Fallback prepared** (`pipeline_v3/day_fallback.py`, CPU smoke test passed):
+  - **Model:** the released three-head detector v1, frozen. Release `bdb7748c`, XLS-R 300M, heads with seeds 42/43/44, threshold p ≥ 0.5623. That threshold was set on dev for a 5% false-alarm and 5% miss budget, not 2%.
+  - **Trials:** the same (id, channel) trials as `day_target evaluate`.
+  - **Provenance:** trained on ASVspoof 5 train (A01–A08, including A08) and IndieFake. Neither MLAAD nor M-AILABS is among its sources. MLAAD's four generators are not in its training attacks. Both ASVspoof 5 and M-AILABS come from LibriVox readers, so overlap of the 3 panel readers with ASVspoof 5 speakers **cannot be verified**, because ASVspoof 5 anonymises speakers.
+  - **Output:** `v2/day-target-1/fallback-detector-v1/`, pending the writer's agreement and the end of the chain.
+
 ## Status 25 Nov 2026, 23:06 IST (Claude)
 
 **Sessions:**
